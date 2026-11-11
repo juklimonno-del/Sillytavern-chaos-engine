@@ -1,0 +1,11 @@
+{
+  "display_name": "Story Chaos Engine",
+  "loading_order": 20,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "author": "Story Chaos Engine contributors",
+  "version": "1.1.0",
+  "homePage": "https://github.com/juklimonno-del/Sillytavern-chaos-engine",
+  "auto_update": true
+}
