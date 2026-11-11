@@ -40,3 +40,24 @@
 #sce_settings .sce_actions {
   display:flex; flex-wrap:wrap; gap:.5em;
 }
+
+
+/* Neutral Structural Feedback v1.5 */
+#sce_settings .sce_feedback_section {
+  border-top:1px solid var(--SmartThemeBorderColor);
+  margin-top:.85em; padding-top:.5em;
+}
+#sce_settings .sce_feedback_group[open] {
+  display:flex; flex-direction:column; gap:.65em;
+}
+#sce_settings .sce_feedback_group > summary small {
+  opacity:.75; font-weight:400;
+}
+#sce_settings .sce_feedback_group input[type="range"] { width:100%; }
+#sce_settings .sce_feedback_group .sce_line output {
+  font-variant-numeric:tabular-nums; font-weight:600;
+}
+#sce_settings .sce_feedback_group .sce_preview {
+  white-space:pre-wrap; max-height:27em; overflow-y:auto;
+}
+#sce_settings .sce_feedback_group .sce_actions { flex-wrap:wrap; }
