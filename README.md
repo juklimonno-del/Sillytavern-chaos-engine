@@ -1,5 +1,75 @@
 # Story Chaos Engine 🎲
 
+## New in v1.4.0: Structural Entropy 🧬
+
+Structural Entropy is a **second, completely independent source of randomness**. The existing Chaos Engine chooses creative directions and context-related words. Structural Entropy chooses **how the next response can unfold**. The LLM still invents the actual actions, dialogue, outcomes, and causal logic.
+
+It's **off by default when upgrading** so your existing story output stays the same until you enable it.
+
+### Turn it on
+
+1. Update the extension from SillyTavern's Extension Manager and reload the page.
+2. Open **Extensions → 🎲 Story Chaos Engine → 🧬 Structural Entropy**.
+3. Check **Enable structural rolls**.
+4. Set **Structure influence** to around **65%**, **Beat density** to **55%**, and **Context grounding** to **75%** for an exploratory starting point.
+5. Click **🎲 Preview structure** as often as you like. Every click makes a new *local* roll and doesn't consume anti-repetition history.
+6. Generate a story response normally. The creative roll and structural blueprint are injected together in **one normal prompt** at depth 0.
+
+**No tool calling is required** and **no extra model/API request is made** by the extension in automatic mode.
+
+### Structural Entropy controls
+
+| Control | Meaning |
+| --- | --- |
+| Enable structural rolls | Off by default. Adds an independent structural blueprint to the standard creative roll |
+| Structure influence (0–100%) | 0 disables structural guidance. Higher values favor less-conventional families and create more varied distributions of narrative attention; this is not the API temperature |
+| Beat density (0–100%) | Rough desired number of developments, **not** paragraph count. Actual number is capped by the chosen structure family and gently varied at intermediate values |
+| Context grounding (0–100%) | Weighted structural families according to recent chat dialogue/actions/callbacks, with optional existing story-word anchors. At 0, no anchors or contextual family bias |
+| Avoid repeating recent structures | Prefer families not used in the last **four** structural rolls, when other enabled families are available. It also avoids identical blueprint signatures when possible |
+| Structure family weights | Off, Low, Normal, or High for each family |
+| Preview structure | Rolls and shows the proposed blueprint, without changing chat history or triggering a model call |
+
+Ten structure families are included: **Sustained moment**, **Domino chain**, **Parallel threads**, **Delayed echo**, **Conversational drift**, **Directional pivot**, **Deliberate anti-climax**, **Mosaic of moments**, **Consequence first**, and **Elastic time**.
+
+Each roll chooses a family, a variable number of abstract phases, a relative attention distribution (such as `2 : 4 : 1`), a transition style, and a suggested kind of ending. The engine mixes different phrasings for each family rather than enforcing one universal plot skeleton.
+
+### Example
+
+If a café scene mentions a stolen key and a suspicious friend, a roll might look like this:
+
+```text
+[STRUCTURAL ENTROPY: OPTIONAL RESPONSE ARCHITECTURE, NOT PREWRITTEN PLOT]
+Structural family: Parallel threads (moderate nudge)
+Development density: 4 area(s) of attention, not paragraph requirements
+Relative attention: 3 : 1 : 2 : 2
+Connection style: Intercut ongoing activities
+Existing story words to consider (not mandatory): "key", "coffee"
+Possible abstract phases:
+1. Thread A: Follow an existing activity
+2. Thread B: Let someone pursue a separate priority
+3. Thread A: Return to the first activity with a changed detail
+4. Thread B: Attend to a second independent activity
+Suggested closing behavior: Finish on a completed small action, not a hook.
+...
+```
+
+
+It **does not** tell the model to drop the key, invent a new character, force a reveal, or follow exactly four paragraphs. It tells the model *which narrative relationships and areas of attention might be interesting*, while the model interprets the actual story and character motivations.
+
+If a proposed phase doesn't fit the fiction, the model is instructed to merge or skip it. Existing formatting, length requirements, character ownership, and continuity take priority.
+
+### Context analysis: important limitations
+
+The extension reads the **locally available saved chat messages**, not the complete tokenized API prompt. Its context recognition is lightweight word counting and pattern matching: it can detect signs of conversations, physical activities, observations, and callbacks, but **does not semantically understand the whole story**.
+
+The extracted words are optional anchors, not facts that must be introduced or reenacted. The **context gravity** used by the original creativity engine and the **context grounding** used by Structural Entropy are separate settings. Both use the existing on-device context index, with no separate model inference.
+
+The structural history and word cache live only in the browser session. A reload resets them; your actual SillyTavern chat is unaffected.
+
+For Gemini gateways, keep **Automatic prompt injection** as the operating mode and avoid old prompts forcing a tool call. **Legacy function calling** remains optional but can still trigger provider-specific HTTP 400 errors.
+
+---
+
 A configurable, GitHub-installable [SillyTavern](https://github.com/SillyTavern/SillyTavern) UI extension that adds **external randomness** to roleplay and interactive fiction.
 
 ## v1.3.0: Layered chaos with context bias
