@@ -212,6 +212,196 @@ function sceSyncTool(context = globalThis.SillyTavern?.getContext?.()) {
     }
 }
 
+
+/* Layered randomness (v1.3): browser-side, no additional API round trip. */
+const SCE_CATEGORIES = {
+    direction: {name:'Story direction',weight:3,triggers:[],cues:[],words:['detour','priority','surprise','callback']},
+    character: {name:'Character impulses',weight:2,triggers:['want','need','habit','pride','refuse'],cues:[
+        'A private priority quietly changes a character’s behavior.',
+        'An ordinary habit suggests an unexpected next action.',
+        'Someone makes a confident but questionable personal choice.'
+    ],words:['impulse','fixation','habit','pride']},
+    dialogue: {name:'Dialogue & voice',weight:2,triggers:['ask','speak','talk','question','whisper'],cues:[
+        'Let a character speak in their own peculiar rhythm.',
+        'A tiny misunderstanding redirects the exchange.',
+        'Someone answers a serious question with a mundane concern.'
+    ],words:['pause','tangent','interruption','misquote']},
+    social: {name:'Relationships & friction',weight:2,triggers:['friend','trust','jealous','kiss','promise'],cues:[
+        'A social expectation quietly changes what someone does.',
+        'Two characters interpret the same gesture differently.',
+        'Someone becomes surprisingly petty about a minor issue.'
+    ],words:['favor','grudge','courtesy','obligation']},
+    setting: {name:'Setting & objects',weight:2,triggers:['room','door','table','couch','kitchen','window','rain'],cues:[
+        'An overlooked object already present becomes relevant.',
+        'The environment creates a practical obstacle.',
+        'An ordinary object is repurposed in an unexpected way.'
+    ],words:['hinge','scratch','clutter','texture']},
+    consequences: {name:'Callbacks & consequences',weight:2,triggers:['remember','earlier','forgot','again','broken','owed'],cues:[
+        'A small previous action has a believable delayed consequence.',
+        'An old obligation quietly changes the situation.',
+        'Something earlier becomes unexpectedly useful.'
+    ],words:['receipt','aftermath','reminder','reversal']},
+    humor: {name:'Humor & absurdity',weight:1,triggers:['laugh','funny','joke','ridiculous','embarrass'],cues:[
+        'An unremarkable problem is taken much too personally.',
+        'An awkward reaction is funnier than a clever punchline.',
+        'Someone argues passionately about a trivial detail.'
+    ],words:['deadpan','pettiness','audacity','nonsense']},
+    physical: {name:'Physical & sensory',weight:1,triggers:['touch','warm','cold','noise','soft','smell'],cues:[
+        'A physical detail redirects attention for a moment.',
+        'A concrete task briefly becomes the scene’s focus.',
+        'An odd sensory discomfort shapes someone’s choices.'
+    ],words:['friction','rattle','weight','static']},
+    curiosity: {name:'Curiosity & discovery',weight:1,triggers:['notice','strange','missing','wonder','clue'],cues:[
+        'Someone notices a small, overlooked discrepancy.',
+        'A mundane assumption is quietly questioned.',
+        'A passing curiosity leads into an unconventional tangent.'
+    ],words:['trace','glimpse','oddity','rumor']},
+    pacing: {name:'Pacing & structure',weight:1,triggers:[],cues:[
+        'Let one interaction unfold without artificial escalation.',
+        'Vary the balance of action, dialogue, and description.',
+        'A brief time skip might be more interesting than another reaction.'
+    ],words:['pause','drift','cutaway','snapshot']},
+    wildcard: {name:'Wildcards & detours',weight:1,triggers:[],cues:[
+        'A small distraction deserves attention for its own sake.',
+        'Someone has an independent, unrelated errand.',
+        'The obvious dramatic reaction is declined.'
+    ],words:['swerve','sidequest','coincidence','improvisation']}
+};
+const SCE_STOP = new Set(('a about after again all already also am an and any are as at back be because ' +
+    'been before being between both but by can cannot could did do does doing dont down each either ' +
+    'else even every for from get gets getting give go going got had has have having he her here him ' +
+    'his how i if im in into is it its just know like make many may me might more most much my no ' +
+    'not now of off on one only or other our out over own really said say she should since so some ' +
+    'still such than that the their them then there these they this those through to too under up ' +
+    'us very was we were what when where which while who why will with would yes you your yourself ' +
+    'character char user assistant system model prompt story scenes scene thoughts response message ' +
+    'messages words text instruction instructions').split(' '));
+const sceRecentCueHistory = new Map();
+const sceRecentAnchorHistory = new Map();
+const sceWordIndexCache = new Map();
+const SCE_ADV_DEFAULTS = {
+    intensity:55,maxLayers:3,contextGravity:75,contextScope:'full',
+    customKeywords:'',keywordBoost:30,antiRepeat:true
+};
+
+function sceBound(value,fallback,lo,hi) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(lo,Math.min(hi,Math.round(number))) : fallback;
+}
+function sceChance(pct) { return randomInt(10000) < pct * 100; }
+function sceWeighted(items) {
+    if (!items.length) return null;
+    const total = items.reduce((sum,x)=>sum+Math.max(0,x.weight),0);
+    if (!total) return pick(items).value;
+    let n = randomInt(1000000)/1000000 * total;
+    for (const x of items) { n-=Math.max(0,x.weight); if (n<0) return x.value; }
+    return items[items.length-1].value;
+}
+function sceTokenize(text) {
+    const tokens = globalThis.Intl?.Segmenter ?
+        [...new Intl.Segmenter(undefined,{granularity:'word'}).segment(text)]
+            .filter(x=>x.isWordLike).map(x=>x.segment) :
+        (text.match(/[\p{L}\p{M}]+/gu)||[]);
+    return tokens.map(x=>x.toLocaleLowerCase()).filter(x=>
+        x.length >= (/[\u3040-\u30ff\u3400-\u9fff]/u.test(x)?2:3) &&
+        x.length<=28 && !SCE_STOP.has(x) && !/^\d+$/u.test(x));
+}
+function sceWordIndex(context) {
+    const chat = Array.isArray(context?.chat)?context.chat:[];
+    const opts = sceSettings(context);
+    const key = getChatKey();
+    const last = chat[chat.length-1]?.mes||'';
+    const signature = opts.contextScope+'|'+chat.length+'|'+last.length+'|'+last.slice(-120);
+    const cache = sceWordIndexCache.get(key);
+    if (cache?.signature===signature) return cache.index;
+
+    const counts = new Map(), nearby = new Map(), recent = new Set();
+    let budget = 300000, analyzed = 0;
+    for (let i=chat.length-1;i>=0;i--) {
+        const age = chat.length-1-i;
+        if (opts.contextScope==='recent' && analyzed>=16) break;
+        const msg = chat[i];
+        if (!msg || msg.is_system || typeof msg.mes!=='string' ||
+            msg.extra?.tool_calls || msg.extra?.tool_result) continue;
+        const text = msg.mes.slice(0,4000)
+            .replace(/<[^>]*>|https?:\/\/\S+|\{\{[^}]+\}\}/g,' ');
+        if (text.length>budget) break;
+        budget-=text.length;
+        analyzed++;
+        const words=sceTokenize(text);
+        const weight=age<3?4:age<12?2.3:age<28?1.4:0.55;
+        for (let j=0;j<words.length;j++) {
+            const word=words[j];
+            counts.set(word,(counts.get(word)||0)+weight);
+            if (age<12) recent.add(word);
+            const co=nearby.get(word)||new Map();
+            for (let k=Math.max(0,j-2);k<=Math.min(words.length-1,j+2);k++)
+                if (j!==k && words[j]!==words[k])
+                    co.set(words[k],(co.get(words[k])||0)+weight/(1+Math.abs(k-j)));
+            nearby.set(word,co);
+        }
+    }
+    const options=[...counts].map(([value,count])=>
+        ({value,weight:Math.min(16,1+Math.log2(1+count)*2)}));
+    const index={options,nearby,recent,analyzed};
+    sceWordIndexCache.set(key,{signature,index});
+    if (sceWordIndexCache.size>8) sceWordIndexCache.delete(sceWordIndexCache.keys().next().value);
+    return index;
+}
+function scePersonalWords(value) {
+    return [...new Set(String(value||'').split(/[\n,;]+/g)
+        .map(x=>x.replace(/[^\p{L}\p{M}\p{N}\s'’-]/gu,' ')
+            .replace(/\s+/g,' ').trim().slice(0,48))
+        .filter(x=>x && x.split(' ').length<=4))].slice(0,80);
+}
+function sceLayeredRoll(context = globalThis.SillyTavern?.getContext?.(),preview=false) {
+    const opts=sceSettings(context);
+    const base=JSON.parse(generateCreativeRoll(preview));
+    const index=sceWordIndex(context);
+    const key=getChatKey();
+    const old=sceRecentCueHistory.get(key)||[];
+    const candidates=Object.entries(SCE_CATEGORIES)
+        .filter(([name])=>opts.categoryWeights[name]>0)
+        .map(([name,cat])=>({value:name,
+            weight:opts.categoryWeights[name] *
+                (1+opts.contextGravity/100*0.7*Math.min(4,cat.triggers.filter(x=>index.recent.has(x)).length))
+        }));
+    const target=1+Array.from({length:opts.maxLayers-1},
+        ()=>sceChance(opts.intensity)).filter(Boolean).length;
+    const layers=[];
+    while(layers.length<target && candidates.length) {
+        const id=sceWeighted(candidates), def=SCE_CATEGORIES[id];
+        const pool=id==='direction'?[base.creative_mode]:def.cues;
+        const fresh=opts.antiRepeat?pool.filter(s=>!old.includes(id+':'+s)):pool;
+        const instruction=pick(fresh.length?fresh:pool);
+        layers.push({id,title:def.name,instruction});
+        if (!preview) {old.unshift(id+':'+instruction);old.length=Math.min(15,old.length);}
+        candidates.splice(candidates.findIndex(x=>x.value===id),1);
+    }
+    if (!preview) sceRecentCueHistory.set(key,old);
+
+    const prev=sceRecentAnchorHistory.get(key)||[];
+    const fresh=opts.antiRepeat?index.options.filter(x=>!prev.includes(x.value)):index.options;
+    const anchor=index.options.length&&sceChance(opts.contextGravity)?
+        sceWeighted(fresh.length?fresh:index.options):null;
+    if(anchor&&!preview) sceRecentAnchorHistory.set(key,[anchor,...prev].slice(0,5));
+    const custom=scePersonalWords(opts.customKeywords);
+    const free=layers.flatMap(x=>SCE_CATEGORIES[x.id].words);
+    const sparks=[];
+    const sparkCount=opts.intensity<35?1:opts.intensity<85?2:3;
+    for (let i=0;i<sparkCount;i++) {
+        let word=null;
+        if(custom.length&&sceChance(opts.keywordBoost)) word=pick(custom);
+        else if(index.options.length&&sceChance(opts.contextGravity)) {
+            const nearby=anchor&&index.nearby.get(anchor);
+            word=nearby?.size?sceWeighted([...nearby].map(([value,weight])=>({value,weight}))):
+                sceWeighted(index.options);
+        } else word=pick(free.length?free:SCE_CATEGORIES.direction.words);
+        if(word && word!==anchor && !sparks.includes(word)) sparks.push(word);
+    }
+    return {...base,anchor,word_sparks:sparks,layers,context_messages:index.analyzed};
+}
+
 function sceInit() {
     const context = globalThis.SillyTavern?.getContext?.();
     if (!context) return;
