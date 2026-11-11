@@ -1,82 +1,56 @@
 # Story Chaos Engine 🎲
 
-A lightweight third-party **SillyTavern UI extension** that gives fiction-writing models a genuinely external random creative nudge, instead of asking the model to imitate randomness.
+An installable SillyTavern UI extension that provides external random writing directions for roleplay and interactive fiction.
 
-This extension registers a function-calling tool called `story_chaos_roll`. When the model calls it, browser JavaScript picks a creative direction and focus, sometimes adds a pacing suggestion or wildcard, and returns the result to the model. No external service, server plugin, extra API key, or package installation is required.
+## Gemini proxy fix (v1.2.0)
 
-## Install from GitHub
+**Automatic prompt injection is now the default.** The extension generates a fresh randomized creative direction *before* your normal API request and places it in SillyTavern's prompt at depth 0. There is **no function call, second request, or tool-call follow-up**. This avoids the tool-call conversation formatting that can cause OpenAI-to-Gemini proxies to return HTTP 400: "Requests ending with a model turn are not supported."
 
-1. In SillyTavern, open **Extensions → Install Extension**.
-2. Paste the repository URL: `https://github.com/juklimonno-del/Sillytavern-chaos-engine`.
-3. Install the extension and reload SillyTavern if needed.
-4. In **AI Response Configuration**, turn on **Enable function calling**.
-5. Use a Chat Completion source and model with tool-calling support.
+**Important upgrade steps:**
 
-SillyTavern's installer expects `manifest.json` at the **root of the Git repository**. This repository has that layout already.
+1. In SillyTavern, update Story Chaos Engine through Extensions and **reload the page**.
+2. In the Extensions settings panel, open **🎲 Story Chaos Engine** and select **Automatic prompt injection (Gemini workaround)**. This is the default.
+3. **Remove the old instruction "Before each normal fiction response, call story_chaos_roll"** from your main and depth-0 prompts. Auto mode doesn't need that instruction.
+4. Disable **Enable function calling** if you don't need other tools.
+5. If the chat contains failed tool-call messages, **start a new chat or remove the failed tool-call turns** before testing. Old malformed tool history can still be sent to the proxy.
 
-For offline/manual installation, copy the *contents of this repository* into:
+Default injection role is **User**, which works well with gateways expecting the last request message to be a user turn. If your model starts misattributing the extension note to the user, you can try **System** role in the same settings panel.
 
-`SillyTavern/data/<user-handle>/extensions/Sillytavern-chaos-engine/`
+This workaround addresses our extension's tool-call round trip, not every possible cause of the proxy error. Live testing against your specific proxy is still needed.
 
-For a shared installation, use SillyTavern's `public/scripts/extensions/third-party/` directory instead.
+## Installation
 
-## Prompt to activate the tool
+Open **SillyTavern → Extensions → Install Extension** and enter:
 
-Add this brief instruction to the main prompt or a post-history guidance entry:
+https://github.com/juklimonno-del/Sillytavern-chaos-engine
 
-```text
-Before each normal fiction response, call story_chaos_roll once, then continue writing the fiction. Use its creative directions as flexible inspiration, not as mandatory plot events or a fixed beat sequence. Preserve characterization, continuity, and {{user}}'s agency. Do not quote the tool output in the fiction.
-```
+This is a browser-based UI extension, not a server plugin. No build step, external API keys, or backend installation are needed.
 
-## Returned example
+## What it generates
 
-```json
-{
-  "roll": 534,
-  "creative_mode": "A character acts on a private priority nobody else is considering.",
-  "focus": "ordinary logistics",
-  "rhythm": "Mostly dialogue, if the scene supports it.",
-  "guidance": "Use these as optional creative directions, not literal events or mandatory beats..."
-}
-```
+- A random integer from 1 to 1000.
+- One of 18 creative directions, avoiding the last six per chat during the current browser session.
+- One of 16 secondary focuses.
+- An optional pacing cue (~48% chance).
+- An optional wildcard (~28% chance).
 
-Each call returns:
+Directions are deliberately **optional**, not a rigid beat checklist. The extension tells the model to preserve established characters, continuity, user agency and output formatting.
 
-- One random integer from **1 to 1000**.
-- One random **creative mode** from a pool of eighteen, avoiding the last six per chat while the browser session stays open.
-- One random **focus** from a pool of sixteen.
-- Optionally, one of eight **rhythms** (~48% chance) and one of twelve **wildcards** (~28% chance).
+## Settings
 
-The function takes **no arguments**, so the model cannot request or preselect a particular result. Calls use Web Crypto when available, with `Math.random()` as a fallback.
+- **Automatic prompt injection:** Default and recommended for Gemini proxies. SillyTavern rolls the randomizer in a pre-generation interceptor and inserts it at depth 0.
+- **Legacy function calling:** Registers the parameter-free tool `story_chaos_roll`. Use only when the provider supports full function-call history; this can reproduce the HTTP 400 on some proxies.
+- **Off:** Disable randomness.
+- **Automatic injection role:** User (default) or System.
 
-## What it does *not* do
+## Developer notes
 
-- It does not guarantee the model will call the function, even when prompted. Tool invocation is ultimately model-controlled.
-- It does not guarantee each creative direction will be followed, or eliminate repetitive storytelling by itself.
-- It does not persist anti-repeat history when the browser is restarted or reloaded.
-- It does not bypass model or provider policies.
-- It does not automatically inject a roll into prompts without a model tool call.
+The v1.2.0 workaround uses SillyTavern's documented `generate_interceptor` manifest field and `getContext().setExtensionPrompt()` to inject a randomized note into the assembled prompt. The original function tool remains as an opt-in fallback only. Chat messages are not edited; no tool call is requested.
 
-Tool calls can add a generation round trip. The tool is registered with `stealth: false` so SillyTavern can perform its normal follow-up generation and show the roll in the chat history.
-
-## Development
-
-Everything runs in the SillyTavern browser; there is no build step.
-
-Requirements for local automated tests: **Node.js 20+**.
-
-```sh
-node --test
-```
-
-When contributing, keep the function tool schema simple and test with both a known tool-capable model and a model that ignores tool calls. Do not rely only on the automated tests to validate live integration.
-
-## Documentation
-
-- [SillyTavern: Installing extensions](https://docs.sillytavern.app/extensions/)
-- [SillyTavern: Writing UI extensions](https://docs.sillytavern.app/for-contributors/writing-extensions/)
+Sources:
+- [SillyTavern: Writing extensions and prompt interceptors](https://docs.sillytavern.app/for-contributors/writing-extensions/)
 - [SillyTavern: Function calling](https://docs.sillytavern.app/for-contributors/function-calling/)
 
 ## License
 
-MIT (see [LICENSE](LICENSE)).
+MIT. See [LICENSE](LICENSE).
