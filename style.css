@@ -16,3 +16,27 @@
     overflow:auto; border:1px solid var(--SmartThemeBorderColor); border-radius:6px; padding:.7em;
     font-size:.83em; margin:.25em 0; }
 #sce_settings .sce_preview[hidden] { display:none; }
+
+/* Structural Entropy */
+#sce_settings .sce_structure_section {
+  border-top: 1px solid var(--SmartThemeBorderColor);
+  margin-top: .85em;
+  padding-top: .4em;
+}
+#sce_settings .sce_structure_group[open] {
+  display: flex;
+  flex-direction: column;
+  gap: .6em;
+}
+#sce_settings .sce_structure_group > summary small {
+  opacity: .75;
+  font-weight: 400;
+}
+#sce_settings .sce_structure_group input[type="range"] { width:100%; }
+#sce_settings .sce_structure_group .sce_line output {
+  font-variant-numeric:tabular-nums;
+  font-weight:600;
+}
+#sce_settings .sce_actions {
+  display:flex; flex-wrap:wrap; gap:.5em;
+}
