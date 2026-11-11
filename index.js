@@ -647,19 +647,30 @@ function sceStructuralRoll(context = globalThis.SillyTavern?.getContext?.(), pre
             return {
                 value: id,
                 weight: options.structureWeights[id] * noveltyBoost *
-                    (1 + grounding * Math.min(8, compatible) * .14) * distancePenalty *
-                    (options.structureAntiRepeat && recentFamilyIds.includes(id) ? .005 : 1),
+                    (1 + grounding * Math.min(8, compatible) * .14) * distancePenalty,
             };
         });
     if (!pool.length) return null;
 
-    const familyId = sceWeighted(pool);
+    // Exclude the last four families when alternatives exist; if every enabled
+    // family was just used, fall back gracefully rather than returning nothing.
+    const freshFamilies = options.structureAntiRepeat
+        ? pool.filter(item => !recentFamilyIds.includes(item.value)) : pool;
+    const familyId = sceWeighted(freshFamilies.length ? freshFamilies : pool);
     const family = SCE_STRUCTURE_FAMILIES[familyId];
     const count = Math.max(family.min, Math.min(family.max, target));
-    const beats = sceStructureBlueprint(familyId, count);
-    const attention = sceStructureAttention(count, options.structureInfluence);
-    const transition = pick(family.transitions);
-    const ending = pick(SCE_STRUCTURE_ENDINGS);
+    // Re-roll the internal arrangement if it duplicates a recent blueprint.
+    // This also helps when a user enables only one structural family.
+    let beats, attention, transition, ending, signature;
+    for (let attempt = 0; attempt < 6; attempt++) {
+        beats = sceStructureBlueprint(familyId, count);
+        attention = sceStructureAttention(count, options.structureInfluence);
+        transition = pick(family.transitions);
+        ending = pick(SCE_STRUCTURE_ENDINGS);
+        signature = familyId + ':' + count + ':' + attention.join('-') + ':' +
+            transition + ':' + beats.join('|');
+        if (!options.structureAntiRepeat || !history.some(item => item.signature === signature)) break;
+    }
     const index = sceWordIndex(context);
     const oldAnchors = SCE_STRUCTURE_ANCHORS.get(key) || [];
     const candidates = options.structureAntiRepeat
@@ -676,7 +687,6 @@ function sceStructuralRoll(context = globalThis.SillyTavern?.getContext?.(), pre
     }
     if (!preview && anchors.length) SCE_STRUCTURE_ANCHORS.set(key,
         [...anchors, ...oldAnchors].slice(0, 10));
-    const signature = familyId + ':' + count + ':' + attention.join('-') + ':' + transition;
     if (!preview) SCE_STRUCTURE_HISTORY.set(key,
         [{family:familyId,signature}, ...history].slice(0, 8));
     return {
