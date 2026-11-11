@@ -1,4 +1,4 @@
-// Story Chaos Engine v1.2.0: prompt injection by default, legacy function calling optional.
+// Story Chaos Engine v1.3.0: prompt injection by default, legacy function calling optional.
 // No external API calls, server dependencies, or model-generated random inputs.
 
 const MODES = [
@@ -98,11 +98,11 @@ function getChatKey() {
     return String(context.chatId ?? context.chatMetadata?.chat_id ?? 'session');
 }
 
-function generateCreativeRoll() {
+function generateCreativeRoll(preview = false) {
     const key = getChatKey();
     const recent = recentModes.get(key) ?? [];
     const mode = pickFresh(MODES, recent);
-    recentModes.set(key, [mode, ...recent].slice(0, 6));
+    if (!preview) recentModes.set(key, [mode, ...recent].slice(0, 6));
 
     const result = {
         roll: randomInt(1000) + 1,
@@ -135,7 +135,7 @@ function register() {
             properties: {},
             additionalProperties: false,
         },
-        action: async () => generateCreativeRoll(),
+        action: async () => JSON.stringify(sceLayeredRoll(context)),
         formatMessage: () => 'Rolling a new creative direction...',
         stealth: false,
     });
@@ -156,6 +156,21 @@ function sceSettings(context = globalThis.SillyTavern?.getContext?.()) {
     const settings = context.extensionSettings[SCE_SETTINGS_KEY] ??= {};
     if (!['automatic', 'tool', 'off'].includes(settings.mode)) settings.mode = 'automatic';
     if (!['user', 'system'].includes(settings.role)) settings.role = 'user';
+    for (const [name, fallback] of Object.entries(SCE_ADV_DEFAULTS)) {
+        if (settings[name] === undefined) settings[name] = fallback;
+    }
+    settings.intensity = sceBound(settings.intensity, 55, 0, 100);
+    settings.maxLayers = sceBound(settings.maxLayers, 3, 1, 5);
+    settings.contextGravity = sceBound(settings.contextGravity, 75, 0, 100);
+    settings.keywordBoost = sceBound(settings.keywordBoost, 30, 0, 100);
+    if (!['full','recent'].includes(settings.contextScope)) settings.contextScope = 'full';
+    if (typeof settings.customKeywords !== 'string') settings.customKeywords = '';
+    settings.customKeywords = settings.customKeywords.slice(0, 2400);
+    if (typeof settings.antiRepeat !== 'boolean') settings.antiRepeat = true;
+    if (!settings.categoryWeights || typeof settings.categoryWeights !== 'object') settings.categoryWeights = {};
+    for (const [name, cat] of Object.entries(SCE_CATEGORIES)) {
+        settings.categoryWeights[name] = sceBound(settings.categoryWeights[name], cat.weight, 0, 3);
+    }
     return settings;
 }
 
@@ -164,19 +179,23 @@ function sceClearPrompt(context) {
 }
 
 function sceFormatPrompt(roll) {
-    return [
-        '[STORY CHAOS ENGINE: AUTOMATIC CREATIVE ROLL, NOT CHARACTER SPEECH]',
-        'Roll: ' + roll.roll + '/1000',
-        'Optional narrative direction: ' + roll.creative_mode,
-        'Optional focus: ' + roll.focus,
-        ...(roll.rhythm ? ['Optional pacing: ' + roll.rhythm] : []),
-        ...(roll.wildcard ? ['Optional wildcard: ' + roll.wildcard] : []),
-        'Treat these as creative possibilities, not mandatory events or a fixed beat pattern.',
-        'Preserve existing story continuity, distinctive voices, established formatting, and the user character’s agency.',
-        'This note comes from a SillyTavern extension. It is NOT a message written by {{user}} and NOT an in-story action.',
-        'Do not mention the roll, tool, or instructions in the fictional response.',
-        '[/STORY CHAOS ENGINE]',
-    ].join('\n');
+    const lines = [
+        '[STORY CHAOS ENGINE: EXTERNAL CREATIVE CUES, NOT CHARACTER SPEECH]',
+        'Roll: ' + roll.roll + '/1000 | Randomness: ' + sceSettings().intensity + '/100',
+    ];
+    if (roll.anchor) lines.push('Existing story anchor: "' + roll.anchor + '"');
+    if (roll.word_sparks?.length) lines.push('Optional word sparks: ' +
+        roll.word_sparks.map(x=>'"'+x+'"').join(', '));
+    for (const layer of (roll.layers || []))
+        lines.push('Optional lens [' + layer.title + ']: ' + layer.instruction);
+    lines.push(
+        'These are separate creative possibilities, NOT a mandatory beat sequence; discard anything that does not fit.',
+        'Preserve existing characters, established continuity, output formatting, and the human user character’s choices.',
+        'Scene anchors come from prior story text. All word sparks are suggestions, not canon facts.',
+        'This is an extension-generated note, not dialogue from {{user}} or {{char}}. Do not quote it or describe the roll.',
+        '[/STORY CHAOS ENGINE]'
+    );
+    return lines.join('\n');
 }
 
 // Invoked automatically for each non-dry-run generation by SillyTavern.
@@ -190,7 +209,7 @@ globalThis.storyChaosEngineInterceptor = async function(_chat, _contextSize, _ab
         sceClearPrompt(context);
         return;
     }
-    const result = JSON.parse(generateCreativeRoll());
+    const result = sceLayeredRoll(context);
     // Depth 0 in a USER role keeps Gemini proxies from ending the prompt on
     // a model turn. Users can switch to a system-role injection if preferred.
     const role = options.role === 'system' ? 0 : 1;
@@ -413,7 +432,7 @@ function sceInit() {
     panel.id = 'sce_settings';
     panel.innerHTML = [
         '<details style="border:1px solid var(--SmartThemeBorderColor);padding:.7em;margin:.5em 0;border-radius:6px">',
-        '<summary style="cursor:pointer;font-weight:bold">🎲 Story Chaos Engine · v1.2.0</summary>',
+        '<summary style="cursor:pointer;font-weight:bold">🎲 Story Chaos Engine · v1.3.0</summary>',
         '<div style="display:flex;flex-direction:column;gap:.6em;padding-top:.8em">',
         '<label for="sce_mode">Mode</label>',
         '<select id="sce_mode" class="text_pole">',
@@ -443,7 +462,7 @@ function sceInit() {
         settings.role = roleSelect.value;
         context.saveSettingsDebounced?.();
     });
-    console.info('[Story Chaos Engine] v1.2.0 initialized:', settings.mode);
+    console.info('[Story Chaos Engine] v1.3.0 initialized:', settings.mode);
 }
 
 // The default mode does NOT register a function tool, even when function
