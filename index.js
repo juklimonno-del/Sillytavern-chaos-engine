@@ -983,7 +983,17 @@ function sceFeedbackFactors(context, report) {
     if (!settings.feedbackObserverEnabled || !settings.feedbackBalancerEnabled ||
         settings.feedbackStrength<=0 || !report || report.available<4 ||
         report.dominant.length===0) return diagnostics;
-    const outcomes=sceFeedbackState(context).outcomes;
+    const chat = Array.isArray(context?.chat) ? context.chat : [];
+    const outcomes = sceFeedbackState(context).outcomes.filter(item => {
+        // Live sessions always record an index and content signature.
+        // Check them again for read-only reports, without mutating state.
+        if (Number.isInteger(item.index) && typeof item.signature === 'string') {
+            const message = chat[item.index];
+            return sceFeedbackMessageEligible(message) &&
+                sceFeedbackHash(message.mes) === item.signature;
+        }
+        return !Number.isInteger(item.index) && item.signature == null;
+    });
     diagnostics.dominant=report.dominant;
     for (const id of Object.keys(SCE_STRUCTURE_FAMILIES)) {
         const matches=outcomes.filter(x=>x.family===id);
