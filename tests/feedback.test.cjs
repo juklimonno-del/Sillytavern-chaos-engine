@@ -266,3 +266,25 @@ test('only existing structural weights affect rolls when feedback lacks evidence
         assert.equal(structure.familyId,'parallel');
     }
 });
+
+
+test('read-only factor calculation ignores edited replies before next generation',()=>{
+    const b=boot({feedbackObserverEnabled:true,feedbackBalancerEnabled:true,
+        feedbackStrength:100},[reply(plain()),reply(plain())]);
+    const state=b.fb.state(b.context);
+    for(let i=0;i<2;i++) {
+        const fp=b.fb.fingerprint(b.context.chat[i]);
+        state.outcomes.push({
+            family:'sustained',index:i,signature:fp.signature,
+            fingerprint:{quotationBand:fp.quotationBand,
+                paragraphShape:fp.paragraphShape,endingMark:fp.endingMark},
+        });
+    }
+    const synthetic={available:8,dominant:[
+        {key:'endingMark',label:'Terminal punctuation',value:'period',count:8,total:8},
+    ]};
+    assert.equal(b.fb.factors(b.context,synthetic).ready,true);
+    b.context.chat[0].mes='Edited after selection?';
+    b.context.chat[1].mes='Edited again!';
+    assert.equal(b.fb.factors(b.context,synthetic).ready,false);
+});
