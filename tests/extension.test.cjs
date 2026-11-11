@@ -69,7 +69,7 @@ function countLayers(prompt) { return (prompt.match(/Optional lens \[/g)||[]).le
 test('manifest is installable and advertises v1.3.0 and CSS',()=>{
     assert.equal(manifest.js,'index.js');
     assert.equal(manifest.css,'style.css');
-    assert.equal(manifest.version,'1.4.0');
+    assert.equal(manifest.version,'1.5.0');
     assert.equal(manifest.generate_interceptor,'storyChaosEngineInterceptor');
     assert.ok(fs.existsSync(path.join(root,'style.css')));
 });
