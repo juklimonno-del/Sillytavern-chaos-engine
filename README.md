@@ -1,56 +1,93 @@
 # Story Chaos Engine 🎲
 
-An installable SillyTavern UI extension that provides external random writing directions for roleplay and interactive fiction.
+A configurable, GitHub-installable [SillyTavern](https://github.com/SillyTavern/SillyTavern) UI extension that adds **external randomness** to roleplay and interactive fiction.
 
-## Gemini proxy fix (v1.2.0)
+## v1.3.0: Layered chaos with context bias
 
-**Automatic prompt injection is now the default.** The extension generates a fresh randomized creative direction *before* your normal API request and places it in SillyTavern's prompt at depth 0. There is **no function call, second request, or tool-call follow-up**. This avoids the tool-call conversation formatting that can cause OpenAI-to-Gemini proxies to return HTTP 400: "Requests ending with a model turn are not supported."
+The extension now has a **randomness mixer**. It can sample from eleven categories, combine multiple creative lenses, and select words and associations from what is actually happening in your SillyTavern conversation. Control the balance between established story details and weird lateral ideas.
 
-**Important upgrade steps:**
+The **v1.2.0 Gemini proxy workaround is preserved**. Automatic mode rolls locally *before* the generation request and injects the resulting creative note at depth zero. **No extra Gemini call and no tool-call response** are needed.
 
-1. In SillyTavern, update Story Chaos Engine through Extensions and **reload the page**.
-2. In the Extensions settings panel, open **🎲 Story Chaos Engine** and select **Automatic prompt injection (Gemini workaround)**. This is the default.
-3. **Remove the old instruction "Before each normal fiction response, call story_chaos_roll"** from your main and depth-0 prompts. Auto mode doesn't need that instruction.
-4. Disable **Enable function calling** if you don't need other tools.
-5. If the chat contains failed tool-call messages, **start a new chat or remove the failed tool-call turns** before testing. Old malformed tool history can still be sent to the proxy.
+### New controls
 
-Default injection role is **User**, which works well with gateways expecting the last request message to be a user turn. If your model starts misattributing the extension note to the user, you can try **System** role in the same settings panel.
+Open **Extensions → Story Chaos Engine**:
 
-This workaround addresses our extension's tool-call round trip, not every possible cause of the proxy error. Live testing against your specific proxy is still needed.
+| Setting | Effect |
+| --- | --- |
+| Operating mode | **Automatic** (default), legacy function calling, or Off |
+| Injection role | User (default for Gemini proxy compatibility) or System |
+| **Creative randomness (0–100%)** | At 0, one creative lens per turn. At 100, the engine draws as many different layers as allowed. Intermediate settings vary the number of layers. |
+| **Maximum creative layers (1–5)** | Upper bound on the number of simultaneous, independent category suggestions |
+| **Context gravity (0–100%)** | At high values, pull scene anchors and word sparks from chat history, and boost categories matching recent keywords. At low values, draw more unrelated category words |
+| **Context window** | Scan the current available chat (newest first, up to 300,000 characters) or just the 16 most recent story messages |
+| **Category weights** | Set each category to Off, Low, Normal, or High to bias how often it is chosen |
+| **Custom keywords** | Add comma/newline-separated words or short phrases |
+| **Custom keyword preference (0–100%)** | Chance to draw an optional word spark from your custom list |
+| **Avoid recent cues and anchors** | Avoid repeating recent selected directions and contextual anchor words within each chat, until the page reloads |
+| **Preview a roll** | Show the exact creative note without an API call, modifying chat history, or consuming the anti-repeat list |
 
-## Installation
+Eleven independently weighted categories are available: **Story direction, Character impulses, Dialogue & voice, Relationships & friction, Setting & objects, Callbacks & consequences, Humor & absurdity, Physical & sensory, Curiosity & discovery, Pacing & structure, and Wildcards & detours.**
 
-Open **SillyTavern → Extensions → Install Extension** and enter:
+Any category can be turned off. The default weights preserve the original Story Direction cues while introducing more diverse possibilities.
+
+### Example of the injected text
+
+```text
+[STORY CHAOS ENGINE: EXTERNAL CREATIVE CUES, NOT CHARACTER SPEECH]
+Roll: 712/1000 | Randomness: 65/100
+Existing story anchor: "teapot"
+Optional word sparks: "porcelain", "velvet"
+Optional lens [Character impulses]: A private priority quietly changes a character’s behavior.
+Optional lens [Setting & objects]: An overlooked object already present becomes relevant.
+...
+```
+
+
+**These are optional creative lenses, not mandatory narrative beats.** If an idea contradicts the scene, characterization, established formatting, or continuity, the model is asked to disregard it.
+
+### How the context bias works
+
+The extension reads **chat messages already present in the local SillyTavern client**. It filters system/tool messages, tokenizes words (with browser word segmentation when available), weighs recurring words and recent references, and identifies nearby words. Scene anchors and some keyword sparks are sampled from those candidates.
+
+The category selection also gets a modest boost when recent story words match category themes (for example, *door* or *kitchen* can slightly favor Setting & objects).
+
+This is **lightweight, heuristic lexical matching**, not full semantic analysis or a second LLM. It is context-sensitive, but it cannot guarantee that every chosen word will be appropriate. It does **not** read every hidden prompt, World Info entry, or backend context component. "Whole chat" means the locally available **saved chat history**, subject to the 300,000-character processing cap. The model still interprets the injected cues alongside the full prompt it receives.
+
+The extension itself makes no external API calls. Its randomization runs in the browser, and the chosen words are included in the regular model prompt you already send.
+
+### Installation / updating
+
+Use SillyTavern's **Extensions → Install Extension** with:
 
 https://github.com/juklimonno-del/Sillytavern-chaos-engine
 
-This is a browser-based UI extension, not a server plugin. No build step, external API keys, or backend installation are needed.
+If you already installed the extension, select **Update** in **Manage Extensions**, then reload the SillyTavern page. Existing **mode** and **role** settings are preserved and new defaults are added automatically.
 
-## What it generates
+For Gemini through an OpenAI-to-Google proxy:
 
-- A random integer from 1 to 1000.
-- One of 18 creative directions, avoiding the last six per chat during the current browser session.
-- One of 16 secondary focuses.
-- An optional pacing cue (~48% chance).
-- An optional wildcard (~28% chance).
+1. Use **Automatic prompt injection** (default).
+2. Keep **User** injection role unless your proxy works better with System.
+3. **Remove old prompts telling Gemini to call `story_chaos_roll`.** Automatic mode does not need them.
+4. Disable global function calling if it is not needed for other extensions.
+5. Test with a clean chat if previous failed tool-call turns are still present in the history.
 
-Directions are deliberately **optional**, not a rigid beat checklist. The extension tells the model to preserve established characters, continuity, user agency and output formatting.
+The **Legacy function tool** mode is still available for models/providers that can reliably complete a tool-call round trip. It registers a parameter-free tool named `story_chaos_roll`. Some Gemini proxies reject that workflow; use automatic mode there.
 
-## Settings
+### Development
 
-- **Automatic prompt injection:** Default and recommended for Gemini proxies. SillyTavern rolls the randomizer in a pre-generation interceptor and inserts it at depth 0.
-- **Legacy function calling:** Registers the parameter-free tool `story_chaos_roll`. Use only when the provider supports full function-call history; this can reproduce the HTTP 400 on some proxies.
-- **Off:** Disable randomness.
-- **Automatic injection role:** User (default) or System.
+Browser-side JavaScript, no build step or server component. Node.js 20+ for tests.
 
-## Developer notes
+```sh
+node --check index.js
+node --test
+```
 
-The v1.2.0 workaround uses SillyTavern's documented `generate_interceptor` manifest field and `getContext().setExtensionPrompt()` to inject a randomized note into the assembled prompt. The original function tool remains as an opt-in fallback only. Chat messages are not edited; no tool call is requested.
+The GitHub Actions workflow runs the test suite when supported by GitHub's runner availability. Automated tests exercise the local context/selection engine and a mocked SillyTavern UI; **live compatibility with your particular provider still needs to be tested in SillyTavern**.
 
-Sources:
-- [SillyTavern: Writing extensions and prompt interceptors](https://docs.sillytavern.app/for-contributors/writing-extensions/)
-- [SillyTavern: Function calling](https://docs.sillytavern.app/for-contributors/function-calling/)
+### Privacy
 
-## License
+No analytics or tracking. Never paste passwords or API keys into custom keywords; extension settings are saved in SillyTavern's ordinary settings store, not encrypted.
 
-MIT. See [LICENSE](LICENSE).
+See the [SillyTavern extension API documentation](https://docs.sillytavern.app/for-contributors/writing-extensions/).
+
+MIT license, see [LICENSE](LICENSE).
