@@ -1,4 +1,4 @@
-// Story Chaos Engine v1.4.0: prompt injection by default, legacy function calling optional.
+// Story Chaos Engine v1.5.0: prompt injection by default, legacy function calling optional.
 // No external API calls, server dependencies, or model-generated random inputs.
 
 const MODES = [
@@ -1119,6 +1119,76 @@ function sceStructureUI(panel, config) {
     });
 }
 
+
+function sceFeedbackUI(panel, config) {
+    if (typeof document === 'undefined') return;
+    const root = panel.querySelector('details > div');
+    if (!root) return;
+    const section = document.createElement('section');
+    section.className = 'sce_feedback_section';
+    section.innerHTML = [
+        '<details class="sce_group sce_feedback_group">',
+        '<summary>📊 Structural Feedback <small>neutral observer + optional balancer</small></summary>',
+        '<label class="sce_line" for="sce_feedback_observer"><span>Enable the Observer</span>',
+        '<input type="checkbox" id="sce_feedback_observer"></label>',
+        '<small>Read previous model responses and measure mechanical patterns only. No quality scores, moral classifications, or inferred plot semantics.</small>',
+        '<label class="sce_line" for="sce_feedback_balancer"><span>Enable adaptive Balancer</span>',
+        '<input type="checkbox" id="sce_feedback_balancer"></label>',
+        '<small>The Balancer needs Observer enabled, Structural Entropy enabled, at least 4 earlier responses, and enough matched structure/outcome evidence. Otherwise probabilities are unchanged.</small>',
+        '<div class="sce_line"><label for="sce_feedback_strength">Balancing strength</label>',
+        '<output id="sce_feedback_strength_out"></output></div>',
+        '<input type="range" id="sce_feedback_strength" min="0" max="100" step="1">',
+        '<label for="sce_feedback_window">Previous assistant replies to measure</label>',
+        '<select class="text_pole" id="sce_feedback_window">',
+        '<option value="4">Last 4 responses</option>',
+        '<option value="8">Last 8 responses</option>',
+        '<option value="16">Last 16 responses</option>',
+        '</select>',
+        '<div class="sce_actions">',
+        '<button class="menu_button" type="button" id="sce_feedback_analyze">📊 Analyze current replies</button>',
+        '<button class="menu_button" type="button" id="sce_feedback_reset">Reset learned associations</button>',
+        '</div>',
+        '<pre class="sce_preview" id="sce_feedback_report" hidden></pre>',
+        '<small>All measurements run locally. Analysis never calls an LLM or edits the chat. A reset clears only session-local family/outcome associations, not the chat history.</small>',
+        '</details>',
+    ].join('');
+    root.appendChild(section);
+    const el = id => section.querySelector('#sce_' + id);
+    const save = (key,value) => {
+        sceSettings()[key] = value;
+        globalThis.SillyTavern?.getContext?.()?.saveSettingsDebounced?.();
+    };
+    el('feedback_observer').checked = !!config.feedbackObserverEnabled;
+    el('feedback_observer').addEventListener('change', e =>
+        save('feedbackObserverEnabled', e.target.checked));
+    el('feedback_balancer').checked = !!config.feedbackBalancerEnabled;
+    el('feedback_balancer').addEventListener('change', e =>
+        save('feedbackBalancerEnabled', e.target.checked));
+    const strength = el('feedback_strength'), strengthOut = el('feedback_strength_out');
+    strength.value = config.feedbackStrength;
+    strengthOut.textContent = strength.value + '%';
+    strength.addEventListener('input', e => {
+        strengthOut.textContent = e.target.value + '%';
+        save('feedbackStrength', Number(e.target.value));
+    });
+    el('feedback_window').value = String(config.feedbackWindow);
+    el('feedback_window').addEventListener('change', e =>
+        save('feedbackWindow', Number(e.target.value)));
+    el('feedback_analyze').addEventListener('click', () => {
+        const report = el('feedback_report');
+        report.textContent = sceFeedbackReportText(globalThis.SillyTavern?.getContext?.());
+        report.hidden = false;
+    });
+    el('feedback_reset').addEventListener('click', () => {
+        const context = globalThis.SillyTavern?.getContext?.();
+        if (context) SCE_FEEDBACK_STATES.delete(getChatKey());
+        const report = el('feedback_report');
+        report.textContent = 'Session-local structural family/outcome associations were reset.\n' +
+            'Saved chat messages and measurement history were not changed.';
+        report.hidden = false;
+    });
+}
+
 function sceAdvancedUI(panel, config) {
     const root = panel.querySelector('details > div');
     if (!root) return;
@@ -1216,7 +1286,7 @@ function sceInit() {
     panel.id = 'sce_settings';
     panel.innerHTML = [
         '<details style="border:1px solid var(--SmartThemeBorderColor);padding:.7em;margin:.5em 0;border-radius:6px">',
-        '<summary style="cursor:pointer;font-weight:bold">🎲 Story Chaos Engine · v1.4.0</summary>',
+        '<summary style="cursor:pointer;font-weight:bold">🎲 Story Chaos Engine · v1.5.0</summary>',
         '<div style="display:flex;flex-direction:column;gap:.6em;padding-top:.8em">',
         '<label for="sce_mode">Mode</label>',
         '<select id="sce_mode" class="text_pole">',
@@ -1248,7 +1318,8 @@ function sceInit() {
     });
     sceAdvancedUI(panel, settings);
     sceStructureUI(panel, settings);
-    console.info('[Story Chaos Engine] v1.4.0 initialized:', settings.mode);
+    sceFeedbackUI(panel, settings);
+    console.info('[Story Chaos Engine] v1.5.0 initialized:', settings.mode);
 }
 
 // The default mode does NOT register a function tool, even when function
