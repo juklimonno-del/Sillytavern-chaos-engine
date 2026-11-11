@@ -734,6 +734,290 @@ function sceFormatCombined(creativeRoll, structure) {
     const base = sceFormatPrompt(creativeRoll);
     return structure ? base + '\n\n' + sceFormatStructure(structure) : base;
 }
+
+/* Neutral Structural Observer & optional empirical Balancer (v1.5).
+ *
+ * Observer: surface measurements of previous model replies, never opinions
+ * about tone, morality, quality, character decisions or desirable outcomes.
+ *
+ * Balancer: learns associations between structural families and *measured*
+ * reply fingerprints in this browser session. It has no fixed target style.
+ * Only repeated observed traits may affect family weights, and only after
+ * at least two confirmed matched outcomes for an individual family.
+ * The original family-weight selection remains untouched when evidence
+ * is insufficient. No extra network requests or model calls.
+ */
+const SCE_FEEDBACK_DEFAULTS = Object.freeze({
+    feedbackObserverEnabled: false,
+    feedbackBalancerEnabled: false,
+    feedbackStrength: 65,
+    feedbackWindow: 8,
+});
+const SCE_FEEDBACK_STATES = new Map();
+const SCE_FEEDBACK_TRAITS = Object.freeze([
+    ['quotationBand', 'Quotation coverage band'],
+    ['paragraphShape', 'Paragraph-length arrangement'],
+    ['endingMark', 'Terminal punctuation'],
+]);
+
+function sceFeedbackMessageEligible(m) {
+    return !!m && m.is_user === false && !m.is_system &&
+        typeof m.mes === 'string' && m.mes.trim().length > 0 &&
+        !m.extra?.tool_calls && !m.extra?.tool_result && !m.extra?.type &&
+        !m.mes.trimStart().startsWith('[STORY CHAOS ENGINE');
+}
+
+function sceFeedbackHash(text) {
+    // A lightweight version signature used ONLY to invalidate edited/swiped
+    // reply associations. Not a security or identity hash.
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i++) {
+        hash ^= text.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16) + ':' + text.length;
+}
+function sceFeedbackTextTokens(text) {
+    return (String(text).toLocaleLowerCase().match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) || []).slice(0, 2200);
+}
+function sceFeedbackFingerprint(messageOrText) {
+    const raw = typeof messageOrText === 'string' ? messageOrText : messageOrText?.mes || '';
+    const text = String(raw).slice(0, 16000);
+    const tokens = sceFeedbackTextTokens(text);
+    const blocks = text.trim().split(/\n\s*\n+/u).filter(x => x.trim());
+    const sizes = blocks.map(x => sceFeedbackTextTokens(x).length);
+    const total = sizes.reduce((a,b)=>a+b, 0) || 1;
+    const firstShare = sizes.length ? sizes[0] / total : 0;
+    const lastShare = sizes.length ? sizes[sizes.length-1] / total : 0;
+    const avg = total / Math.max(1,sizes.length);
+    const variation = sizes.length <= 1 ? 0 :
+        Math.sqrt(sizes.reduce((sum,n)=>sum+Math.pow(n-avg,2),0) / sizes.length) / Math.max(1,avg);
+    const paragraphShape = sizes.length <= 1 ? 'single' :
+        firstShare >= 0.60 ? 'front-heavy' :
+        lastShare >= 0.60 ? 'back-heavy' :
+        variation <= 0.3 ? 'even' : 'mixed';
+    // Exact quote-delimiter matching. This is not a semantic dialogue detector.
+    let quoteChars = 0;
+    const quoteExp = /"([^"\n]{1,1500})"|“([^”\n]{1,1500})”/gu;
+    for (const match of text.matchAll(quoteExp)) quoteChars += (match[1] || match[2] || '').length;
+    const quotationShare = quoteChars / Math.max(1,text.length);
+    const quotationBand = quotationShare < .20 ? 'under 20%' :
+        quotationShare < .60 ? '20–60%' : 'over 60%';
+    // Remove trailing formatting and closing quotes, not substantive marks.
+    const terminal = text.trim().replace(/[\s*_\x60"'”’\])}]+$/gu,'').slice(-1);
+    const endingMark = terminal === '?' ? 'question mark' :
+        terminal === '!' ? 'exclamation mark' :
+        terminal === '.' ? 'period' :
+        terminal === '…' ? 'ellipsis' : 'other';
+    const phrases = new Set();
+    for (let i=0; i<tokens.length-3; i++) {
+        phrases.add(tokens.slice(i,i+4).join(' '));
+    }
+    return {
+        signature: sceFeedbackHash(raw),
+        wordCount: tokens.length,
+        paragraphs: sizes.length,
+        quotationShare, quotationBand, paragraphShape, endingMark,
+        openingFour: tokens.slice(0,4).join(' '),
+        closingFour: tokens.slice(-4).join(' '),
+        fourGrams: phrases,
+    };
+}
+function sceFeedbackReplySamples(context, window, type='normal') {
+    const chat = Array.isArray(context?.chat) ? context.chat : [];
+    const entries = [];
+    for (let i=0; i<chat.length; i++) {
+        if (sceFeedbackMessageEligible(chat[i])) {
+            entries.push({index:i, message:chat[i]});
+        }
+    }
+    // When swiping/regenerating, the last assistant reply is the one being
+    // replaced; exclude it rather than measuring a soon-to-be-discarded reply.
+    if ((type === 'swipe' || type === 'regenerate') && entries.length) entries.pop();
+    return entries.slice(-window).map(x=>({...x, fingerprint:sceFeedbackFingerprint(x.message)}));
+}
+function sceFeedbackDominant(samples) {
+    if (samples.length < 4) return [];
+    const results = [];
+    for (const [key, label] of SCE_FEEDBACK_TRAITS) {
+        const frequencies = new Map();
+        for (const sample of samples) {
+            const value = sample.fingerprint[key];
+            frequencies.set(value,(frequencies.get(value)||0)+1);
+        }
+        const [value,count] = [...frequencies].sort((a,b)=>b[1]-a[1])[0];
+        if (count >= Math.ceil(samples.length * .67)) {
+            results.push({key, label, value, count, total:samples.length});
+        }
+    }
+    return results;
+}
+function sceFeedbackObserve(context, type='normal') {
+    const config = sceSettings(context);
+    const window = config.feedbackWindow;
+    const samples = sceFeedbackReplySamples(context, window, type);
+    const frequencies = key => {
+        const result = {};
+        for (const sample of samples) {
+            const value = sample.fingerprint[key];
+            result[value] = (result[value] || 0) + 1;
+        }
+        return result;
+    };
+    const median = values => {
+        if (!values.length) return 0;
+        const a = [...values].sort((x,y)=>x-y);
+        return (a[Math.floor((a.length-1)/2)] + a[Math.floor(a.length/2)]) / 2;
+    };
+    const repeated = key => {
+        const occur = new Map();
+        for (const x of samples) {
+            const phrase = x.fingerprint[key];
+            if (phrase.length) occur.set(phrase,(occur.get(phrase)||0)+1);
+        }
+        return [...occur.values()].filter(n=>n>1).reduce((a,b)=>a+b,0);
+    };
+    const fourgramDocFrequency = new Map();
+    for (const x of samples) for (const phrase of x.fingerprint.fourGrams) {
+        fourgramDocFrequency.set(phrase,(fourgramDocFrequency.get(phrase)||0)+1);
+    }
+    const repeats = [...fourgramDocFrequency.values()].filter(v=>v>=2).length;
+    return {
+        available: samples.length,
+        window,
+        medianWords: median(samples.map(x=>x.fingerprint.wordCount)),
+        medianParagraphs: median(samples.map(x=>x.fingerprint.paragraphs)),
+        meanQuotationPercent: samples.length ?
+            Math.round(100 * samples.reduce((sum,x)=>sum+x.fingerprint.quotationShare,0)/samples.length) : 0,
+        quotationBands: frequencies('quotationBand'),
+        paragraphShapes: frequencies('paragraphShape'),
+        endings: frequencies('endingMark'),
+        repeatedOpeningReplies: repeated('openingFour'),
+        repeatedClosingReplies: repeated('closingFour'),
+        sharedFourTokenSequences: repeats,
+        dominant: sceFeedbackDominant(samples),
+        // Only in-memory aggregate/fingerprint information; not raw chat.
+        samples,
+    };
+}
+function sceFeedbackState(context) {
+    const key = getChatKey();
+    if (!SCE_FEEDBACK_STATES.has(key)) {
+        SCE_FEEDBACK_STATES.set(key,{pending:null,outcomes:[]});
+        if (SCE_FEEDBACK_STATES.size > 12) {
+            SCE_FEEDBACK_STATES.delete(SCE_FEEDBACK_STATES.keys().next().value);
+        }
+    }
+    return SCE_FEEDBACK_STATES.get(key);
+}
+function sceFeedbackReconcile(context, type='normal') {
+    const state = sceFeedbackState(context);
+    const chat = Array.isArray(context?.chat) ? context.chat : [];
+    if (state.pending) {
+        const i = chat.findIndex((msg,idx)=>idx>=state.pending.startIndex &&
+            sceFeedbackMessageEligible(msg));
+        if (i>=0) {
+            const fingerprint = sceFeedbackFingerprint(chat[i]);
+            state.outcomes = state.outcomes.filter(o=>o.index!==i);
+            state.outcomes.push({
+                family:state.pending.family, index:i,
+                signature:fingerprint.signature,
+                fingerprint: {
+                    quotationBand:fingerprint.quotationBand,
+                    paragraphShape:fingerprint.paragraphShape,
+                    endingMark:fingerprint.endingMark,
+                },
+            });
+            state.outcomes=state.outcomes.slice(-96);
+        }
+        // A missing response was likely aborted; never guess an attribution.
+        state.pending=null;
+    }
+    // A swipe or regenerate replaces the last assistant response. Discard its
+    // recorded association, rather than learning from a replaced outcome.
+    if (type==='swipe'||type==='regenerate') {
+        let lastAssistant=-1;
+        for(let i=0;i<chat.length;i++) if(sceFeedbackMessageEligible(chat[i]))lastAssistant=i;
+        if(lastAssistant>=0) state.outcomes=state.outcomes.filter(x=>x.index!==lastAssistant);
+    }
+    state.outcomes=state.outcomes.filter(x=>{
+        const m=chat[x.index];
+        return sceFeedbackMessageEligible(m) && sceFeedbackHash(m.mes)===x.signature;
+    });
+    return state;
+}
+function sceFeedbackPending(context, familyId, type='normal') {
+    if(type!=='normal' || !familyId) return;
+    const chat=Array.isArray(context?.chat)?context.chat:[];
+    const state=sceFeedbackState(context);
+    state.pending={family:familyId,startIndex:chat.length};
+}
+function sceFeedbackFactors(context, report) {
+    const settings=sceSettings(context);
+    const factors=new Map();
+    const diagnostics={ready:false,dominant:[],matched:0,factors};
+    if (!settings.feedbackObserverEnabled || !settings.feedbackBalancerEnabled ||
+        settings.feedbackStrength<=0 || !report || report.available<4 ||
+        report.dominant.length===0) return diagnostics;
+    const outcomes=sceFeedbackState(context).outcomes;
+    diagnostics.dominant=report.dominant;
+    for (const id of Object.keys(SCE_STRUCTURE_FAMILIES)) {
+        const matches=outcomes.filter(x=>x.family===id);
+        if (matches.length<2) continue;
+        let meanAgreement=0;
+        for (const dominant of report.dominant) {
+            const p=matches.filter(x=>x.fingerprint[dominant.key]===dominant.value).length /
+                matches.length;
+            meanAgreement+=(1-2*p)/report.dominant.length;
+        }
+        // Scale symmetrically around 1.0. 1 = no change.
+        // Two observations imply only a small confidence adjustment.
+        const confidence=Math.min(1,(matches.length-1)/4);
+        const factor=Math.max(.6,Math.min(1.4,
+            1+(settings.feedbackStrength/100)*.4*meanAgreement*confidence));
+        factors.set(id,{factor,samples:matches.length});
+        diagnostics.matched+=matches.length;
+    }
+    diagnostics.ready=factors.size>0;
+    return diagnostics;
+}
+function sceFeedbackReportText(context, type='normal') {
+    const report=sceFeedbackObserve(context,type);
+    const factors=sceFeedbackFactors(context,report);
+    const values=obj=>Object.entries(obj).sort((a,b)=>b[1]-a[1])
+        .map(([key,n])=>key+': '+n).join(' · ') || 'None';
+    const lines=[
+        'STRUCTURAL OBSERVER | measurable text patterns only',
+        'Model replies analyzed: '+report.available+' / '+report.window,
+        'Median words: '+report.medianWords,
+        'Median paragraphs: '+report.medianParagraphs,
+        'Mean matched quotation coverage: '+report.meanQuotationPercent+'%',
+        'Quotation coverage bands: '+values(report.quotationBands),
+        'Paragraph-length arrangements: '+values(report.paragraphShapes),
+        'Terminal punctuation: '+values(report.endings),
+        'Replies sharing an exact 4-token opening: '+report.repeatedOpeningReplies,
+        'Replies sharing an exact 4-token closing: '+report.repeatedClosingReplies,
+        'Distinct 4-token sequences present in at least 2 replies: '+report.sharedFourTokenSequences,
+        'Repeated measured traits (>=67% of observed replies): '+
+            (report.dominant.length ? report.dominant.map(x=>
+                x.label+' = '+x.value+' ('+x.count+'/'+x.total+')').join(' · ') : 'None / insufficient evidence'),
+        '',
+        'BALANCER (independent from measurements)',
+        'Observer enabled: '+(sceSettings(context).feedbackObserverEnabled?'yes':'no'),
+        'Balancer enabled: '+(sceSettings(context).feedbackBalancerEnabled?'yes':'no'),
+        'Evidence-based family adjustments: '+(factors.ready?'available':'not enough matched evidence'),
+    ];
+    if (factors.ready) for (const [id,x] of factors.factors) {
+        lines.push('  '+SCE_STRUCTURE_FAMILIES[id].title+': x'+x.factor.toFixed(3)+
+            ' ('+x.samples+' matched output(s))');
+    }
+    lines.push('The Observer does not measure quality, appropriateness, character intent, or plot semantics.',
+        'Quotation spans are not a reliable semantic measure of dialogue.',
+        'A family/outcome association is observational, not evidence of causation.',
+        'No ideal dialogue ratio, ending type, paragraph shape or moral tone is assumed.');
+    return lines.join('\n');
+}
+
 function sceStructureUI(panel, config) {
     if (typeof document === 'undefined') return;
     const root = panel.querySelector('details > div');
