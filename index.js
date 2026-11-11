@@ -188,6 +188,14 @@ function sceSettings(context = globalThis.SillyTavern?.getContext?.()) {
     for (const [id,family] of Object.entries(SCE_STRUCTURE_FAMILIES)) {
         settings.structureWeights[id] = sceBound(settings.structureWeights[id], family.weight, 0, 3);
     }
+    for (const [name, defaultValue] of Object.entries(SCE_FEEDBACK_DEFAULTS)) {
+        if (settings[name] === undefined) settings[name] = defaultValue;
+    }
+    if (typeof settings.feedbackObserverEnabled !== 'boolean') settings.feedbackObserverEnabled = false;
+    if (typeof settings.feedbackBalancerEnabled !== 'boolean') settings.feedbackBalancerEnabled = false;
+    settings.feedbackStrength = sceBound(settings.feedbackStrength, 65, 0, 100);
+    if (![4, 8, 16].includes(Number(settings.feedbackWindow))) settings.feedbackWindow = 8;
+    else settings.feedbackWindow = Number(settings.feedbackWindow);
     return settings;
 }
 
@@ -227,11 +235,17 @@ globalThis.storyChaosEngineInterceptor = async function(_chat, _contextSize, _ab
         return;
     }
     const result = sceLayeredRoll(context);
-    const structural = options.structureEnabled ? sceStructuralRoll(context) : null;
+    if (options.structureEnabled && options.feedbackObserverEnabled) {
+        sceFeedbackReconcile(context, type || 'normal');
+    }
+    const structural = options.structureEnabled ? sceStructuralRoll(context, false, type || 'normal') : null;
     // Depth 0 in a USER role keeps Gemini proxies from ending the prompt on
     // a model turn. Users can switch to a system-role injection if preferred.
     const role = options.role === 'system' ? 0 : 1;
     context.setExtensionPrompt(SCE_PROMPT_ID, sceFormatCombined(result, structural), 1, 0, false, role);
+    if (options.structureEnabled && options.feedbackObserverEnabled && structural) {
+        sceFeedbackPending(context, structural.familyId, type || 'normal');
+    }
     const label = typeof document !== 'undefined' && document.getElementById('sce_last_roll');
     if (label) label.textContent = 'Latest roll: ' + result.roll + ' · ' + result.creative_mode;
     console.debug('[Story Chaos Engine] Automatic seed injected.');
@@ -627,7 +641,7 @@ function sceStructureAttention(count, influence) {
     }
     return weights;
 }
-function sceStructuralRoll(context = globalThis.SillyTavern?.getContext?.(), preview = false) {
+function sceStructuralRoll(context = globalThis.SillyTavern?.getContext?.(), preview = false, type = 'normal') {
     const options = sceStructureSettings(context);
     if (!options.structureEnabled || options.structureInfluence <= 0) return null;
     const key = getChatKey();
@@ -651,6 +665,16 @@ function sceStructuralRoll(context = globalThis.SillyTavern?.getContext?.(), pre
             };
         });
     if (!pool.length) return null;
+
+    // Optional empirical feedback only. No hardcoded preferred style or
+    // unearned assumptions about what each structural family will produce.
+    if (!preview && options.feedbackObserverEnabled && options.feedbackBalancerEnabled) {
+        const report = sceFeedbackObserve(context, type);
+        const observed = sceFeedbackFactors(context, report);
+        for (const item of pool) {
+            item.weight *= observed.factors.get(item.value)?.factor || 1;
+        }
+    }
 
     // Exclude the last four families when alternatives exist; if every enabled
     // family was just used, fall back gracefully rather than returning nothing.
