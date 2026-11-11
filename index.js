@@ -1,4 +1,4 @@
-// Story Chaos Engine v1.3.0: prompt injection by default, legacy function calling optional.
+// Story Chaos Engine v1.4.0: prompt injection by default, legacy function calling optional.
 // No external API calls, server dependencies, or model-generated random inputs.
 
 const MODES = [
@@ -135,7 +135,11 @@ function register() {
             properties: {},
             additionalProperties: false,
         },
-        action: async () => JSON.stringify(sceLayeredRoll(context)),
+        action: async () => {
+            const roll = sceLayeredRoll(context);
+            const structure = sceSettings(context).structureEnabled ? sceStructuralRoll(context) : null;
+            return JSON.stringify({...roll, structural: structure});
+        },
         formatMessage: () => 'Rolling a new creative direction...',
         stealth: false,
     });
@@ -170,6 +174,19 @@ function sceSettings(context = globalThis.SillyTavern?.getContext?.()) {
     if (!settings.categoryWeights || typeof settings.categoryWeights !== 'object') settings.categoryWeights = {};
     for (const [name, cat] of Object.entries(SCE_CATEGORIES)) {
         settings.categoryWeights[name] = sceBound(settings.categoryWeights[name], cat.weight, 0, 3);
+    }
+    for (const [key, fallback] of Object.entries(SCE_STRUCTURE_DEFAULTS)) {
+        if (settings[key] === undefined) settings[key] = fallback;
+    }
+    if (typeof settings.structureEnabled !== 'boolean') settings.structureEnabled = false;
+    settings.structureInfluence = sceBound(settings.structureInfluence, 65, 0, 100);
+    settings.beatDensity = sceBound(settings.beatDensity, 55, 0, 100);
+    settings.structureGrounding = sceBound(settings.structureGrounding, 75, 0, 100);
+    if (typeof settings.structureAntiRepeat !== 'boolean') settings.structureAntiRepeat = true;
+    if (!settings.structureWeights || typeof settings.structureWeights !== 'object' ||
+        Array.isArray(settings.structureWeights)) settings.structureWeights = {};
+    for (const [id,family] of Object.entries(SCE_STRUCTURE_FAMILIES)) {
+        settings.structureWeights[id] = sceBound(settings.structureWeights[id], family.weight, 0, 3);
     }
     return settings;
 }
@@ -210,10 +227,11 @@ globalThis.storyChaosEngineInterceptor = async function(_chat, _contextSize, _ab
         return;
     }
     const result = sceLayeredRoll(context);
+    const structural = options.structureEnabled ? sceStructuralRoll(context) : null;
     // Depth 0 in a USER role keeps Gemini proxies from ending the prompt on
     // a model turn. Users can switch to a system-role injection if preferred.
     const role = options.role === 'system' ? 0 : 1;
-    context.setExtensionPrompt(SCE_PROMPT_ID, sceFormatPrompt(result), 1, 0, false, role);
+    context.setExtensionPrompt(SCE_PROMPT_ID, sceFormatCombined(result, structural), 1, 0, false, role);
     const label = typeof document !== 'undefined' && document.getElementById('sce_last_roll');
     if (label) label.textContent = 'Latest roll: ' + result.roll + ' · ' + result.creative_mode;
     console.debug('[Story Chaos Engine] Automatic seed injected.');
@@ -422,6 +440,367 @@ function sceLayeredRoll(context = globalThis.SillyTavern?.getContext?.(),preview
 }
 
 
+
+/* Structural Entropy v1.4: independent narrative architecture.
+ * The engine rolls abstract phases. Gemini creates the actual story beats.
+ * No model call, API request, persistence, or external analysis is used.
+ */
+const SCE_STRUCTURE_DEFAULTS = {
+    structureEnabled: false,
+    structureInfluence: 65,
+    beatDensity: 55,
+    structureGrounding: 75,
+    structureAntiRepeat: true,
+};
+const SCE_STRUCTURE_FAMILIES = {
+    sustained: {
+        title: 'Sustained moment', weight: 3, min: 1, max: 2,
+        affinity: {dialogue:1, action:1, observation:1},
+        phases: [['Sustain one ongoing interaction','Explore a practical task in detail','Stay with one character initiative'],
+                 ['Let a minor consequence register','Allow a small aside without changing the primary focus']],
+        transitions: ['Unbroken continuity','Brief natural aside','Subtle shift of attention'],
+    },
+    domino: {
+        title: 'Domino chain', weight: 2, min: 2, max: 5,
+        affinity: {action:2, consequence:2},
+        phases: [['Begin with an action already possible','Let a small decision create the first change'],
+                 ['Follow a direct consequence','Follow a character response','Let a practical aftereffect develop'],
+                 ['Carry the latest consequence forward','Leave circumstances visibly changed']],
+        transitions: ['Direct cause and effect','Physical follow-through','Action-to-reaction handoff'],
+    },
+    parallel: {
+        title: 'Parallel threads', weight: 2, min: 2, max: 5,
+        affinity: {dialogue:1, action:1, social:2},
+        phases: [['Follow an existing activity','Return to the first activity with a changed detail'],
+                 ['Attend to a second independent activity','Let someone pursue a separate priority'],
+                 ['Let two activities brush against one another, if natural','Keep activities separate without forcing convergence']],
+        transitions: ['Alternating perspectives without omniscient leakage','Intercut ongoing activities','Shift between independent concerns'],
+    },
+    echo: {
+        title: 'Delayed echo', weight: 2, min: 3, max: 5,
+        affinity: {consequence:2, observation:2},
+        phases: [['Notice a small established detail','Let an ordinary choice create an unnoticed implication'],
+                 ['Pursue an immediate interaction instead','Allow attention to drift elsewhere'],
+                 ['Return to an earlier detail in a changed context','Let an earlier action matter without a grand reveal']],
+        transitions: ['Temporary digression and later return','Loose association and callback','Delayed consequence'],
+    },
+    dialogue: {
+        title: 'Conversational drift', weight: 2, min: 2, max: 5,
+        affinity: {dialogue:3, social:1},
+        phases: [['Begin with a character-specific conversational impulse','Stay with the present exchange'],
+                 ['Let a detail suggest a tangential topic','Follow an unexpected association','Make room for an awkward conversational turn'],
+                 ['Leave the topic in motion','Return to the original concern only if someone wants to']],
+        transitions: ['Topic association','Speaker-led redirection','Natural conversational interruption'],
+    },
+    pivot: {
+        title: 'Directional pivot', weight: 2, min: 2, max: 5,
+        affinity: {action:2, observation:1},
+        phases: [['Establish one active priority','Develop the ongoing activity'],
+                 ['A believable new priority redirects attention','A character chooses a different immediate objective'],
+                 ['Follow through on the new activity','Explore consequences of the changed priority']],
+        transitions: ['Abrupt but motivated switch','A practical redirection','A character-led change of focus'],
+    },
+    anticlimax: {
+        title: 'Deliberate anti-climax', weight: 2, min: 2, max: 4,
+        affinity: {dialogue:1, social:1, observation:1},
+        phases: [['Allow an expectation to form naturally','Notice an apparent opportunity for drama'],
+                 ['Let the obvious reaction fail to happen','Someone chooses a mundane concern instead'],
+                 ['Continue with ordinary life','Give a trivial detail disproportionate attention']],
+        transitions: ['Expectation quietly deflated','A casual refusal to escalate','Ordinary action takes over'],
+    },
+    mosaic: {
+        title: 'Mosaic of moments', weight: 1, min: 2, max: 5,
+        affinity: {observation:2, social:1},
+        phases: [['Notice a distinctive small behavior','Focus on a mundane physical detail'],
+                 ['Follow a nearby independent activity','A minor social interaction occupies the foreground'],
+                 ['Let a separate observation develop','Return to an earlier detail, optionally']],
+        transitions: ['Loose associative cuts','A collection of adjacent moments','Brief focus changes'],
+    },
+    reverse: {
+        title: 'Consequence first', weight: 1, min: 2, max: 4,
+        affinity: {consequence:2, observation:1},
+        phases: [['Begin with the immediate result of an established or plausible action','Start from a present consequence'],
+                 ['Briefly reveal the cause through concrete context','Let preceding actions become clear without a long flashback'],
+                 ['Continue from the consequence','Show what the new circumstance makes possible']],
+        transitions: ['Short backward glance','A reveal through physical evidence','Present consequence followed by its origin'],
+    },
+    time: {
+        title: 'Elastic time', weight: 1, min: 2, max: 4,
+        affinity: {action:1, observation:2},
+        phases: [['Begin in one ongoing activity','Stay close to a small present moment'],
+                 ['Skip an uneventful stretch of time','Compress repeated ordinary actions'],
+                 ['Reveal change through a fresh detail','Return attention to what has shifted']],
+        transitions: ['Unannounced short time skip','Compressed routine then close detail','Brief ellipsis'],
+    },
+};
+const SCE_STRUCTURE_ENDINGS = [
+    'Finish on a completed small action, not a hook.',
+    'Stay with the current activity as it continues.',
+    'End with a distinctive behavior or physical detail.',
+    'Leave a conversation naturally ongoing without directing a question to the user.',
+    'Allow a new ordinary priority to be underway.',
+    'Stop after a meaningful change in circumstances; no forced cliffhanger.',
+];
+const SCE_STRUCTURE_HISTORY = new Map();
+const SCE_STRUCTURE_ANCHORS = new Map();
+
+function sceStructureSettings(context = globalThis.SillyTavern?.getContext?.()) {
+    return sceSettings(context);
+}
+function sceStructureSignals(context) {
+    const chat = Array.isArray(context?.chat) ? context.chat : [];
+    const recent = chat.slice(-12)
+        .filter(m => m && !m.is_system && typeof m.mes === 'string' &&
+            !m.extra?.tool_calls && !m.extra?.tool_result)
+        .map(m => m.mes.slice(0, 2500)).join('\n');
+    const count = (re) => Math.min(5, (recent.match(re) || []).length);
+    return {
+        dialogue: count(/["“”]|(?:\b(?:said|asked|replied|whispered|shouted|spoke|told)\b)/giu),
+        action: count(/\b(?:grabbed|lifted|opened|closed|walked|ran|moved|sat|stood|picked|dropped|carried|pushed|pulled|reached|turned|shoved|placed|held|touched|followed)\b/giu),
+        consequence: count(/\b(?:again|already|because|afterward|remembered|earlier|forgot|returned|result|therefore|owed)\b/giu),
+        social: count(/\b(?:friend|guest|neighbor|partner|family|apology|promise|jealous|trust|argument)\b/giu),
+        observation: count(/\b(?:noticed|watched|saw|heard|glanced|looked|observed|realized|stared|wondered)\b/giu),
+    };
+}
+function sceStructureTargetCount(density) {
+    const baseline = 1 + Math.round(density * 4 / 100);
+    // A little variation at intermediate settings avoids a fixed number per turn.
+    const jitter = density > 10 && density < 90 ? randomInt(3) - 1 : 0;
+    return Math.min(5, Math.max(1, baseline + jitter));
+}
+function sceStructureBlueprint(familyId, count) {
+    const first = [], middle = [], last = [];
+    const families = SCE_STRUCTURE_FAMILIES;
+    const f = families[familyId];
+    const choose = (set) => pick(set);
+    if (familyId === 'sustained') {
+        first.push(choose(f.phases[0]));
+        if (count > 1) last.push(choose(f.phases[1]));
+        return [...first, ...last];
+    }
+    if (familyId === 'parallel') {
+        // Threads are independent; meeting is never mandatory.
+        for (let i = 0; i < count; i++) {
+            if (i % 2 === 0) middle.push('Thread A: ' + choose(f.phases[0]));
+            else middle.push('Thread B: ' + choose(f.phases[1]));
+        }
+        if (count >= 4 && sceChance(30)) middle[middle.length - 1] = choose(f.phases[2]);
+        return middle;
+    }
+    if (familyId === 'mosaic') {
+        for (let i = 0; i < count; i++)
+            middle.push(choose(f.phases[i % f.phases.length]));
+        return middle;
+    }
+    if (familyId === 'pivot') {
+        const turn = Math.max(1, Math.min(count - 1, 1 + randomInt(Math.max(1, count - 1))));
+        for (let i = 0; i < count; i++) {
+            middle.push(i < turn ? choose(f.phases[0]) :
+                i === turn ? choose(f.phases[1]) : choose(f.phases[2]));
+        }
+        return middle;
+    }
+    if (familyId === 'echo') {
+        first.push(choose(f.phases[0]));
+        for (let i = 0; i < count - 2; i++) middle.push(choose(f.phases[1]));
+        last.push(choose(f.phases[2]));
+        return [...first, ...middle, ...last];
+    }
+    if (familyId === 'reverse' || familyId === 'time' || familyId === 'anticlimax' || familyId === 'dialogue') {
+        first.push(choose(f.phases[0]));
+        for (let i = 0; i < count - 2; i++) middle.push(choose(f.phases[1]));
+        last.push(choose(f.phases[2]));
+        return count === 2 ? [first[0], choose(f.phases[1])] : [...first, ...middle, ...last];
+    }
+    // Domino: start with an action, then follow whatever consequences make sense.
+    first.push(choose(f.phases[0]));
+    for (let i = 0; i < count - 2; i++) middle.push(choose(f.phases[1]));
+    last.push(choose(f.phases[2]));
+    return count === 2 ? [first[0], last[0]] : [...first, ...middle, ...last];
+}
+function sceStructureAttention(count, influence) {
+    const spread = Math.max(1, Math.ceil(influence / 25));
+    const weights = Array.from({length:count}, () => 1 + randomInt(spread + 1));
+    if (weights.length > 1 && weights.every(w => w === weights[0])) {
+        const at = randomInt(count);
+        weights[at] = weights[at] === 1 ? 2 : weights[at] - 1;
+    }
+    return weights;
+}
+function sceStructuralRoll(context = globalThis.SillyTavern?.getContext?.(), preview = false) {
+    const options = sceStructureSettings(context);
+    if (!options.structureEnabled || options.structureInfluence <= 0) return null;
+    const key = getChatKey();
+    const grounding = options.structureGrounding / 100;
+    const influence = options.structureInfluence / 100;
+    const signals = sceStructureSignals(context);
+    const history = SCE_STRUCTURE_HISTORY.get(key) || [];
+    const recentFamilyIds = history.slice(0, 4).map(x => x.family);
+    const target = sceStructureTargetCount(options.beatDensity);
+    const pool = Object.entries(SCE_STRUCTURE_FAMILIES)
+        .filter(([id]) => options.structureWeights[id] > 0)
+        .map(([id, family]) => {
+            const compatible = Object.entries(family.affinity)
+                .reduce((value, [signal, weight]) => value + (signals[signal] || 0) * weight, 0);
+            const noveltyBoost = ['mosaic','reverse','pivot','time','anticlimax'].includes(id) ? 1 + influence : 1;
+            const distancePenalty = 1 / (1 + Math.max(0, family.min - target));
+            return {
+                value: id,
+                weight: options.structureWeights[id] * noveltyBoost *
+                    (1 + grounding * Math.min(8, compatible) * .14) * distancePenalty *
+                    (options.structureAntiRepeat && recentFamilyIds.includes(id) ? .005 : 1),
+            };
+        });
+    if (!pool.length) return null;
+
+    const familyId = sceWeighted(pool);
+    const family = SCE_STRUCTURE_FAMILIES[familyId];
+    const count = Math.max(family.min, Math.min(family.max, target));
+    const beats = sceStructureBlueprint(familyId, count);
+    const attention = sceStructureAttention(count, options.structureInfluence);
+    const transition = pick(family.transitions);
+    const ending = pick(SCE_STRUCTURE_ENDINGS);
+    const index = sceWordIndex(context);
+    const oldAnchors = SCE_STRUCTURE_ANCHORS.get(key) || [];
+    const candidates = options.structureAntiRepeat
+        ? index.options.filter(x => !oldAnchors.includes(x.value)) : index.options;
+    const anchors = [];
+    const maxAnchors = options.structureGrounding > 60 ? 2 : 1;
+    for (let i = 0; i < maxAnchors && index.options.length; i++) {
+        if (!sceChance(options.structureGrounding)) break;
+        const remaining = (candidates.length ? candidates : index.options)
+            .filter(x => !anchors.includes(x.value));
+        if (!remaining.length) break;
+        const word = sceWeighted(remaining);
+        if (word) anchors.push(word);
+    }
+    if (!preview && anchors.length) SCE_STRUCTURE_ANCHORS.set(key,
+        [...anchors, ...oldAnchors].slice(0, 10));
+    const signature = familyId + ':' + count + ':' + attention.join('-') + ':' + transition;
+    if (!preview) SCE_STRUCTURE_HISTORY.set(key,
+        [{family:familyId,signature}, ...history].slice(0, 8));
+    return {
+        family: family.title,
+        familyId,
+        count,
+        beats: beats.map((role,i) => ({role,attention:attention[i]})),
+        attention,
+        transition, ending, anchors,
+        influence: options.structureInfluence,
+        grounding: options.structureGrounding,
+        kind: options.structureInfluence >= 75 ? 'strong creative preference' :
+            options.structureInfluence >= 40 ? 'moderate nudge' : 'light suggestion',
+    };
+}
+function sceFormatStructure(structure) {
+    if (!structure) return '';
+    const lines = [
+        '[STRUCTURAL ENTROPY: OPTIONAL RESPONSE ARCHITECTURE, NOT PREWRITTEN PLOT]',
+        'Structural family: ' + structure.family + ' (' + structure.kind + ')',
+        'Development density: ' + structure.count + ' area(s) of attention, not paragraph requirements',
+        'Relative attention: ' + structure.attention.join(' : '),
+        'Connection style: ' + structure.transition,
+    ];
+    if (structure.anchors.length) {
+        lines.push('Existing story words to consider (not mandatory): ' +
+            structure.anchors.map(x => '"' + x + '"').join(', '));
+    }
+    lines.push('Possible abstract phases:');
+    for (let i = 0; i < structure.beats.length; i++) {
+        lines.push((i+1) + '. ' + structure.beats[i].role);
+    }
+    lines.push(
+        'Suggested closing behavior: ' + structure.ending,
+        'Create actual events and character behavior only from the established fiction. No new user-character decisions or dialogue.',
+        'Phases indicate distribution of narrative attention, not fixed events, required escalations, or a beat-by-beat outline.',
+        'If the current scene naturally supports fewer or different developments, merge or skip phases. Do not force a payoff.',
+        'Do not override existing word count, paragraph, narration, dialogue, or continuity requirements.',
+        'Do not mention these directions in the fiction.',
+        '[/STRUCTURAL ENTROPY]'
+    );
+    return lines.join('\n');
+}
+function sceFormatCombined(creativeRoll, structure) {
+    const base = sceFormatPrompt(creativeRoll);
+    return structure ? base + '\n\n' + sceFormatStructure(structure) : base;
+}
+function sceStructureUI(panel, config) {
+    if (typeof document === 'undefined') return;
+    const root = panel.querySelector('details > div');
+    if (!root) return;
+    const section = document.createElement('section');
+    section.className = 'sce_structure_section';
+    const weights = Object.entries(SCE_STRUCTURE_FAMILIES).map(([id, family]) =>
+        '<label class="sce_cat" for="sce_structure_' + id + '"><span>' + family.title + '</span>' +
+        '<select class="text_pole" id="sce_structure_' + id + '">' +
+        '<option value="0">Off</option><option value="1">Low</option>' +
+        '<option value="2">Normal</option><option value="3">High</option></select></label>'
+    ).join('');
+    section.innerHTML = [
+        '<details class="sce_group sce_structure_group">',
+        '<summary>🧬 Structural Entropy <small>independent beat architecture</small></summary>',
+        '<label class="sce_line" for="sce_structure_enable"><span>Enable structural rolls</span>',
+        '<input type="checkbox" id="sce_structure_enable"></label>',
+        '<small>Off by default when updating, so your existing creative results stay unchanged until you opt in.</small>',
+        '<div class="sce_line"><label for="sce_structure_influence">Structure influence</label>',
+        '<output id="sce_structure_influence_out"></output></div>',
+        '<input type="range" id="sce_structure_influence" min="0" max="100">',
+        '<div class="sce_line"><label for="sce_structure_density">Beat density</label>',
+        '<output id="sce_structure_density_out"></output></div>',
+        '<input type="range" id="sce_structure_density" min="0" max="100">',
+        '<div class="sce_line"><label for="sce_structure_grounding">Context grounding</label>',
+        '<output id="sce_structure_grounding_out"></output></div>',
+        '<input type="range" id="sce_structure_grounding" min="0" max="100">',
+        '<small>Grounding favors structural families fitting recent dialogue/actions, and attaches existing story words. It is lexical, not semantic analysis.</small>',
+        '<label class="sce_line" for="sce_structure_anti_repeat"><span>Avoid repeating recent structures</span>',
+        '<input type="checkbox" id="sce_structure_anti_repeat"></label>',
+        '<details class="sce_group"><summary>Structure family weights</summary>' + weights + '</details>',
+        '<div class="sce_actions"><button class="menu_button" type="button" id="sce_structure_preview">🎲 Preview structure</button></div>',
+        '<pre class="sce_preview" id="sce_structure_output" hidden></pre>',
+        '<small>Gemini still writes every actual beat. The extension never invents established facts or calls another model.</small>',
+        '</details>',
+    ].join('');
+    root.appendChild(section);
+    const el = id => section.querySelector('#sce_' + id);
+    const save = (key,value) => {
+        const current = sceSettings();
+        current[key] = value;
+        globalThis.SillyTavern?.getContext?.()?.saveSettingsDebounced?.();
+    };
+    el('structure_enable').checked = config.structureEnabled;
+    el('structure_enable').addEventListener('change', e => save('structureEnabled', e.target.checked));
+    el('structure_anti_repeat').checked = config.structureAntiRepeat;
+    el('structure_anti_repeat').addEventListener('change', e => save('structureAntiRepeat', e.target.checked));
+    for (const [id,key] of [
+        ['structure_influence','structureInfluence'],
+        ['structure_density','beatDensity'],
+        ['structure_grounding','structureGrounding'],
+    ]) {
+        const slider = el(id), output = el(id+'_out');
+        slider.value = config[key];
+        output.textContent = slider.value + '%';
+        slider.addEventListener('input', e => {
+            const n = Number(e.target.value);
+            output.textContent = n + '%';
+            save(key,n);
+        });
+    }
+    for (const [id] of Object.entries(SCE_STRUCTURE_FAMILIES)) {
+        const select = el('structure_'+id);
+        select.value = config.structureWeights[id];
+        select.addEventListener('change', e => {
+            sceSettings().structureWeights[id] = Number(e.target.value);
+            globalThis.SillyTavern?.getContext?.()?.saveSettingsDebounced?.();
+        });
+    }
+    el('structure_preview').addEventListener('click', () => {
+        const output = el('structure_output');
+        output.textContent = sceFormatStructure(sceStructuralRoll(globalThis.SillyTavern?.getContext?.(),true)) ||
+            'Structural Entropy is disabled or has no enabled structure families.';
+        output.hidden = false;
+    });
+}
+
 function sceAdvancedUI(panel, config) {
     const root = panel.querySelector('details > div');
     if (!root) return;
@@ -499,7 +878,11 @@ function sceAdvancedUI(panel, config) {
     el('antirepeat').addEventListener('change', e => store('antiRepeat', e.target.checked));
     el('preview').addEventListener('click', () => {
         const output = el('preview_text');
-        output.textContent = sceFormatPrompt(sceLayeredRoll(globalThis.SillyTavern?.getContext?.(), true));
+        const current = globalThis.SillyTavern?.getContext?.();
+        output.textContent = sceFormatCombined(
+            sceLayeredRoll(current, true),
+            sceSettings(current).structureEnabled ? sceStructuralRoll(current, true) : null
+        );
         output.hidden = false;
     });
 }
@@ -515,7 +898,7 @@ function sceInit() {
     panel.id = 'sce_settings';
     panel.innerHTML = [
         '<details style="border:1px solid var(--SmartThemeBorderColor);padding:.7em;margin:.5em 0;border-radius:6px">',
-        '<summary style="cursor:pointer;font-weight:bold">🎲 Story Chaos Engine · v1.3.0</summary>',
+        '<summary style="cursor:pointer;font-weight:bold">🎲 Story Chaos Engine · v1.4.0</summary>',
         '<div style="display:flex;flex-direction:column;gap:.6em;padding-top:.8em">',
         '<label for="sce_mode">Mode</label>',
         '<select id="sce_mode" class="text_pole">',
@@ -546,7 +929,8 @@ function sceInit() {
         context.saveSettingsDebounced?.();
     });
     sceAdvancedUI(panel, settings);
-    console.info('[Story Chaos Engine] v1.3.0 initialized:', settings.mode);
+    sceStructureUI(panel, settings);
+    console.info('[Story Chaos Engine] v1.4.0 initialized:', settings.mode);
 }
 
 // The default mode does NOT register a function tool, even when function
