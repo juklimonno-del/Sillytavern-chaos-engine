@@ -1,5 +1,65 @@
 # Story Chaos Engine 🎲
 
+## New in v1.5.0: Neutral Structural Observer + optional Balancer 📊
+
+**Structural Feedback is an opt-in, on-device feedback loop.** The extension examines completed model replies *before the next generation*, measures mechanical writing patterns, and can adjust later Structural Entropy rolls based on **observed associations**, not a built-in literary taste.
+
+It does **not** make an API call, invoke another LLM, grade characters, inspect private reasoning, or rewrite the response after the model has generated it. Gemini still receives one normal request in **Automatic prompt injection** mode.
+
+### Three independent layers
+
+1. **Structural Observer**: Records measurements, not judgments. It reads up to 4, 8, or 16 previous completed model replies in the locally loaded SillyTavern chat. It ignores user messages, system and tool messages. A swipe/regeneration excludes the last model message about to be replaced.
+2. **Empirical Balancer**: Optional. It connects the structural family selected for a normal generation with the actual response that appeared afterward. It remembers only a small structural fingerprint and a message index/signature in the browser session. It does not assume in advance what a family *ought* to produce.
+3. **Structural Entropy**: Uses the Balancer's small probability multipliers when there is enough evidence. Otherwise, it rolls using your original family weights, context settings, and anti-repetition choices.
+
+### What gets measured
+
+- **Matched quotation coverage**: fraction of response characters inside recognizable quotation delimiters; this is **not** guaranteed to be dialogue.
+- **Paragraph count and relative paragraph-length arrangement**: single, front-heavy, back-heavy, even, or mixed, using fixed mechanical thresholds.
+- **Terminal punctuation**: period, question mark, exclamation mark, ellipsis, or other.
+- **Literal repeated text**: the number of replies sharing the exact same first or last four word tokens, and the number of distinct four-token sequences repeated across replies.
+- **Median word and paragraph counts**, plus frequencies of the above categories.
+
+It never classifies sentiment, sexuality, morality, plausibility, profanity, scene intensity, character motivation, writing quality, or whether a topic is desirable. It also does **not** claim to recognize abstract plot beats reliably.
+
+**No statistical method is perfectly assumption-free:** Choosing paragraph and quotation thresholds introduces conventions. They are documented, applied symmetrically, and are not presented as quality standards.
+
+### When the Balancer can act
+
+It is deliberately conservative:
+
+- Both **Observer** and **Balancer** must be on, **Structural Entropy** must be enabled, and **Balancing strength** must be above zero.
+- At least **4 previous model replies** must be available.
+- At least one measured property must have the *same observed value in at least 67%* of that analysis window. The property can be any quotation-coverage band, any paragraph arrangement, or any terminal punctuation category. There is no favored value.
+- A particular structural family must have at least **2 confirmed subsequent model replies associated with it** in the current browser session before its weight can be adjusted.
+- Each family multiplier is limited to **0.6×–1.4×** even at high strength. Small samples receive small adjustments. A family's weight of **Off (0)** always remains zero.
+- When samples don't establish any reliable link, the multiplier remains **1.0×**, which means **no automatic correction**.
+
+This is a correlation-based heuristic, not proof that a structure caused any observed text pattern. It doesn't set target percentages for dialogue, paragraph structure, or endings. If the actual replies repeatedly share a measured trait, families previously associated with that trait can receive a slightly lower probability, while families associated with different results can receive a slightly higher one.
+
+A family associated with dialogue-heavy replies is **not intrinsically penalized**. If later history is mostly sparse in quotations, the same family can receive the reverse adjustment.
+
+### Enable and inspect
+
+In **Extensions → 🎲 Story Chaos Engine → 📊 Structural Feedback**:
+
+1. Enable **Structural Entropy** under its separate section.
+2. Enable **the Observer** to collect purely descriptive information and paired outcomes.
+3. Optionally enable **adaptive Balancer** once you'd like the engine to adjust family selection.
+4. Choose **Balancing strength** (suggested starting point: **40%**) and an analysis window (**8 replies** is a reasonable start).
+5. Select **📊 Analyze current replies** at any time. The report gives exact counts and shows any actual family multipliers. This button is read-only and makes no model call.
+6. **Reset learned associations** if you want to wipe session-local family/outcome matches while leaving your chat untouched.
+
+**Both new checkboxes default to Off for existing installations.** Upgrading will not silently change your fiction. The existing v1.4 creative and structural controls carry over.
+
+### Technical limitations
+
+The Observer examines **the final text visible in the local chat**, not the full API context or any hidden reasoning. Repeated *plot logic* can evade these mechanical measurements. Family/outcome matching is session-local and conservative, and it only pairs responses that can be confidently attributed to a normal generation. A message edited or replaced after the fact invalidates its learned association. A browser reload resets these associations.
+
+The Balancer can influence **future structure selection only**. It cannot guarantee Gemini will follow a blueprint, or detect the repetition in the response currently being written. Feedback adjustments are internal probability multipliers; they are **not** extra directives declaring which sort of fiction is good or bad.
+
+---
+
 ## New in v1.4.0: Structural Entropy 🧬
 
 Structural Entropy is a **second, completely independent source of randomness**. The existing Chaos Engine chooses creative directions and context-related words. Structural Entropy chooses **how the next response can unfold**. The LLM still invents the actual actions, dialogue, outcomes, and causal logic.
