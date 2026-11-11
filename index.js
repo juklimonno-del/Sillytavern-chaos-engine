@@ -421,6 +421,89 @@ function sceLayeredRoll(context = globalThis.SillyTavern?.getContext?.(),preview
     return {...base,anchor,word_sparks:sparks,layers,context_messages:index.analyzed};
 }
 
+
+function sceAdvancedUI(panel, config) {
+    const root = panel.querySelector('details > div');
+    if (!root) return;
+    const block = document.createElement('section');
+    block.className = 'sce_advanced';
+    block.innerHTML = [
+        '<div class="sce_line"><label for="sce_intensity">Creative randomness</label><output id="sce_intensity_out"></output></div>',
+        '<input type="range" id="sce_intensity" min="0" max="100" step="1">',
+        '<small>0 = one light suggestion; 100 = more independent layers, greater variety.</small>',
+        '<div class="sce_line"><label for="sce_layers">Maximum creative layers</label><output id="sce_layers_out"></output></div>',
+        '<input type="range" id="sce_layers" min="1" max="5" step="1">',
+        '<div class="sce_line"><label for="sce_gravity">Context gravity</label><output id="sce_gravity_out"></output></div>',
+        '<input type="range" id="sce_gravity" min="0" max="100" step="1">',
+        '<small>High = favor words from the current story and compatible categories. Low = wider, stranger associations.</small>',
+        '<label for="sce_scope">Context window</label>',
+        '<select id="sce_scope" class="text_pole">',
+        '<option value="full">Whole available chat (up to 300,000 characters)</option>',
+        '<option value="recent">Recent 16 story messages</option></select>',
+        '<details class="sce_group" open><summary>Creative categories & weights</summary>',
+        ...Object.entries(SCE_CATEGORIES).map(([id, cat]) =>
+            '<label for="sce_cat_' + id + '" class="sce_cat"><span>' + cat.name + '</span>' +
+            '<select class="text_pole" id="sce_cat_' + id + '">' +
+            '<option value="0">Off</option><option value="1">Low</option>' +
+            '<option value="2">Normal</option><option value="3">High</option>' +
+            '</select></label>'),
+        '</details>',
+        '<details class="sce_group"><summary>Custom keywords</summary>',
+        '<label for="sce_keywords">Words or short phrases, comma or newline separated</label>',
+        '<textarea id="sce_keywords" class="text_pole" rows="3" maxlength="2400" placeholder="coffee, velvet, awkward pause"></textarea>',
+        '<div class="sce_line"><label for="sce_keywordboost">Custom keyword preference</label><output id="sce_keywordboost_out"></output></div>',
+        '<input type="range" id="sce_keywordboost" min="0" max="100" step="1">',
+        '<small>Increase to include your own words more often. The other keywords are extracted locally from the chat.</small>',
+        '</details>',
+        '<label class="sce_line" for="sce_antirepeat"><span>Avoid recently used cues and anchors</span>',
+        '<input type="checkbox" id="sce_antirepeat"></label>',
+        '<button type="button" class="menu_button" id="sce_preview">🎲 Preview a roll</button>',
+        '<pre class="sce_preview" id="sce_preview_text" hidden></pre>',
+        '<small>Preview is local: no API request, no chat history edits, and no consumption of anti-repeat history.</small>'
+    ].join('');
+    root.appendChild(block);
+    const el = id => block.querySelector('#sce_' + id);
+    function store(name, value) {
+        sceSettings()[name] = value;
+        globalThis.SillyTavern?.getContext?.()?.saveSettingsDebounced?.();
+    }
+    const sliders = [
+        ['intensity','intensity','%'],
+        ['layers','maxLayers',''],
+        ['gravity','contextGravity','%'],
+        ['keywordboost','keywordBoost','%'],
+    ];
+    for (const [id, property, suffix] of sliders) {
+        const slider = el(id);
+        const output = el(id + '_out');
+        slider.value = config[property];
+        output.textContent = slider.value + suffix;
+        slider.addEventListener('input', e => {
+            output.textContent = e.target.value + suffix;
+            store(property, Number(e.target.value));
+        });
+    }
+    el('scope').value = config.contextScope;
+    el('scope').addEventListener('change', e => store('contextScope', e.target.value));
+    for (const [id] of Object.entries(SCE_CATEGORIES)) {
+        const input = el('cat_' + id);
+        input.value = config.categoryWeights[id];
+        input.addEventListener('change', e => {
+            sceSettings().categoryWeights[id] = Number(e.target.value);
+            globalThis.SillyTavern?.getContext?.()?.saveSettingsDebounced?.();
+        });
+    }
+    el('keywords').value = config.customKeywords;
+    el('keywords').addEventListener('input', e => store('customKeywords', e.target.value.slice(0,2400)));
+    el('antirepeat').checked = config.antiRepeat;
+    el('antirepeat').addEventListener('change', e => store('antiRepeat', e.target.checked));
+    el('preview').addEventListener('click', () => {
+        const output = el('preview_text');
+        output.textContent = sceFormatPrompt(sceLayeredRoll(globalThis.SillyTavern?.getContext?.(), true));
+        output.hidden = false;
+    });
+}
+
 function sceInit() {
     const context = globalThis.SillyTavern?.getContext?.();
     if (!context) return;
@@ -462,6 +545,7 @@ function sceInit() {
         settings.role = roleSelect.value;
         context.saveSettingsDebounced?.();
     });
+    sceAdvancedUI(panel, settings);
     console.info('[Story Chaos Engine] v1.3.0 initialized:', settings.mode);
 }
 
