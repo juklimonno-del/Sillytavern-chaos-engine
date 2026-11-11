@@ -9,77 +9,99 @@ const root = path.join(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 
-function boot(chatId = 'chat-one') {
-    let tool;
+function boot(mode = 'automatic') {
+    const injections = [];
+    const registered = [];
+    const extensionSettings = { storyChaosEngine: { mode, role: 'user' } };
     const context = {
-        chatId,
-        registerFunctionTool(definition) { tool = definition; },
+        chatId: 'fiction-chat',
+        extensionSettings,
+        registerFunctionTool(tool) { registered.push(tool); },
+        unregisterFunctionTool(name) { registered.push('unregistered:' + name); },
+        setExtensionPrompt(...args) { injections.push(args); },
+        saveSettingsDebounced() {},
     };
-    const fakeGlobal = {
+    const globalObject = {
         SillyTavern: { getContext: () => context },
         crypto: webcrypto,
-    };
-    const sandbox = {
-        globalThis: fakeGlobal,
-        SillyTavern: fakeGlobal.SillyTavern,
         Uint32Array,
-        Math,
-        Number,
-        JSON,
-        Map,
-        console: { log() {}, info() {}, warn() {} },
+        console: { info() {}, debug() {}, warn() {}, error() {} },
+        document: { readyState: 'complete', getElementById() { return null; } },
     };
-    vm.runInNewContext(source, sandbox, { filename: 'index.js' });
-    assert.ok(tool, 'Expected the extension to register a function tool');
-    return { tool, context };
+    globalObject.globalThis = globalObject;
+    vm.runInNewContext(source, globalObject, { filename: 'index.js' });
+    return { context, globalObject, injections, registered };
 }
 
-test('repository root contains a valid SillyTavern extension manifest', () => {
+test('manifest exposes a pre-generation interceptor', () => {
     assert.equal(manifest.js, 'index.js');
-    assert.equal(typeof manifest.display_name, 'string');
-    assert.ok(manifest.display_name.length > 0);
-    assert.ok(fs.existsSync(path.join(root, manifest.js)));
+    assert.equal(manifest.generate_interceptor, 'storyChaosEngineInterceptor');
+    assert.equal(manifest.version, '1.2.0');
 });
 
-test('registers a parameter-free non-stealth function tool', () => {
-    const { tool } = boot();
-    assert.equal(tool.name, 'story_chaos_roll');
-    assert.equal(tool.parameters.type, 'object');
-    assert.equal(Object.keys(tool.parameters.properties).length, 0);
-    assert.equal(tool.parameters.additionalProperties, false);
-    assert.equal(tool.stealth, false);
-    assert.equal(typeof tool.action, 'function');
+test('automatic mode generates a user-role depth-zero note without registering tools', async () => {
+    const b = boot();
+    assert.equal(b.registered.length, 0);
+    const chat = [{ is_user: true, mes: 'A fictional user action' }];
+    await b.globalObject.storyChaosEngineInterceptor(chat, 9000, () => {}, 'normal');
+    assert.equal(b.injections.length, 1);
+    const [name, prompt, position, depth, scan, role] = b.injections[0];
+    assert.equal(name, 'story_chaos_engine_auto');
+    assert.equal(position, 1);
+    assert.equal(depth, 0);
+    assert.equal(scan, false);
+    assert.equal(role, 1);
+    assert.ok(prompt.includes('Roll: '));
+    assert.ok(prompt.includes('Optional narrative direction: '));
+    assert.ok(prompt.includes('NOT a message written by {{user}}'));
+    assert.equal(chat.length, 1, 'saved chat not modified');
 });
 
-test('each roll has a valid range, direction, focus, and optional fields', async () => {
-    const { tool } = boot();
-    for (let i = 0; i < 500; i++) {
-        const roll = JSON.parse(await tool.action({}));
-        assert.ok(Number.isInteger(roll.roll) && roll.roll >= 1 && roll.roll <= 1000);
-        assert.ok(typeof roll.creative_mode === 'string' && roll.creative_mode.length > 0);
-        assert.ok(typeof roll.focus === 'string' && roll.focus.length > 0);
-        if ('rhythm' in roll) assert.equal(typeof roll.rhythm, 'string');
-        if ('wildcard' in roll) assert.equal(typeof roll.wildcard, 'string');
-        assert.equal(typeof roll.guidance, 'string');
-    }
-});
-
-test('mode selection does not repeat any of the previous six modes per chat', async () => {
-    const { tool } = boot();
+test('rolls are 1 to 1000 and no mode repeats within last six in same chat', async () => {
+    const b = boot();
     const recent = [];
-    for (let i = 0; i < 300; i++) {
-        const roll = JSON.parse(await tool.action({}));
-        assert.equal(recent.includes(roll.creative_mode), false, 'mode repeated within six selections at ' + i);
-        recent.unshift(roll.creative_mode);
-        recent.length = Math.min(recent.length, 6);
+    for (let i = 0; i < 250; i++) {
+        await b.globalObject.storyChaosEngineInterceptor([], 9000, () => {}, 'normal');
+        const prompt = b.injections.at(-1)[1];
+        const roll = Number(prompt.match(/Roll: (\d+)\/1000/)[1]);
+        const mode = prompt.match(/Optional narrative direction: (.*)/)[1];
+        assert.ok(Number.isInteger(roll) && roll >= 1 && roll <= 1000);
+        assert.ok(!recent.includes(mode), 'recent creative direction repeated');
+        recent.unshift(mode);
+        recent.length = Math.min(6, recent.length);
     }
 });
 
-test('different chats have separate fresh-mode histories', async () => {
-    const { tool, context } = boot('first');
-    const first = JSON.parse(await tool.action({}));
-    context.chatId = 'second';
-    const second = JSON.parse(await tool.action({}));
-    assert.ok(first.creative_mode);
-    assert.ok(second.creative_mode);
+test('quiet, continuation, and impersonation clear stale prompt', async () => {
+    const b = boot();
+    for (const type of ['quiet', 'continue', 'impersonate']) {
+        await b.globalObject.storyChaosEngineInterceptor([], 9000, () => {}, type);
+        assert.equal(b.injections.at(-1)[1], '');
+    }
+});
+
+test('off mode does not create any tool or active prompt', async () => {
+    const b = boot('off');
+    await b.globalObject.storyChaosEngineInterceptor([], 9000, () => {}, 'normal');
+    assert.equal(b.registered.length, 0);
+    assert.equal(b.injections.at(-1)[1], '');
+});
+
+test('legacy tool mode remains available as explicit opt-in only', async () => {
+    const b = boot('tool');
+    assert.equal(b.registered.length, 1);
+    const tool = b.registered[0];
+    assert.equal(tool.name, 'story_chaos_roll');
+    assert.equal(Object.keys(tool.parameters.properties).length, 0);
+    const result = JSON.parse(await tool.action({}));
+    assert.ok(result.roll >= 1 && result.roll <= 1000);
+    await b.globalObject.storyChaosEngineInterceptor([], 9000, () => {}, 'normal');
+    assert.equal(b.injections.at(-1)[1], '');
+});
+
+test('system-role injection can be selected', async () => {
+    const b = boot();
+    b.context.extensionSettings.storyChaosEngine.role = 'system';
+    await b.globalObject.storyChaosEngineInterceptor([], 9000, () => {}, 'normal');
+    assert.equal(b.injections[0][5], 0);
 });
