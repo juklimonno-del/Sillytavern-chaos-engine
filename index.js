@@ -1,4 +1,4 @@
-// Story Chaos Engine: a small SillyTavern function-calling extension.
+// Story Chaos Engine v1.2.0: prompt injection by default, legacy function calling optional.
 // No external API calls, server dependencies, or model-generated random inputs.
 
 const MODES = [
@@ -143,4 +143,125 @@ function register() {
     console.info('[Story Chaos Engine] story_chaos_roll registered.');
 }
 
-register();
+
+// --- Gemini-compatible automatic injection ---
+// SillyTavern executes this hook before assembling the next generation prompt.
+// This avoids the second API request that some OpenAI->Google proxies reject.
+const SCE_PROMPT_ID = 'story_chaos_engine_auto';
+const SCE_SETTINGS_KEY = 'storyChaosEngine';
+let sceToolRegistered = false;
+
+function sceSettings(context = globalThis.SillyTavern?.getContext?.()) {
+    if (!context?.extensionSettings) return { mode: 'automatic', role: 'user' };
+    const settings = context.extensionSettings[SCE_SETTINGS_KEY] ??= {};
+    if (!['automatic', 'tool', 'off'].includes(settings.mode)) settings.mode = 'automatic';
+    if (!['user', 'system'].includes(settings.role)) settings.role = 'user';
+    return settings;
+}
+
+function sceClearPrompt(context) {
+    context?.setExtensionPrompt?.(SCE_PROMPT_ID, '', 1, 0, false, 1);
+}
+
+function sceFormatPrompt(roll) {
+    return [
+        '[STORY CHAOS ENGINE: AUTOMATIC CREATIVE ROLL, NOT CHARACTER SPEECH]',
+        'Roll: ' + roll.roll + '/1000',
+        'Optional narrative direction: ' + roll.creative_mode,
+        'Optional focus: ' + roll.focus,
+        ...(roll.rhythm ? ['Optional pacing: ' + roll.rhythm] : []),
+        ...(roll.wildcard ? ['Optional wildcard: ' + roll.wildcard] : []),
+        'Treat these as creative possibilities, not mandatory events or a fixed beat pattern.',
+        'Preserve existing story continuity, distinctive voices, established formatting, and the user character’s agency.',
+        'This note comes from a SillyTavern extension. It is NOT a message written by {{user}} and NOT an in-story action.',
+        'Do not mention the roll, tool, or instructions in the fictional response.',
+        '[/STORY CHAOS ENGINE]',
+    ].join('\n');
+}
+
+// Invoked automatically for each non-dry-run generation by SillyTavern.
+globalThis.storyChaosEngineInterceptor = async function(_chat, _contextSize, _abort, type) {
+    const context = globalThis.SillyTavern?.getContext?.();
+    if (!context?.setExtensionPrompt) return;
+
+    const options = sceSettings(context);
+    if (options.mode !== 'automatic' ||
+        ![undefined, null, '', 'normal', 'regenerate', 'swipe'].includes(type)) {
+        sceClearPrompt(context);
+        return;
+    }
+    const result = JSON.parse(generateCreativeRoll());
+    // Depth 0 in a USER role keeps Gemini proxies from ending the prompt on
+    // a model turn. Users can switch to a system-role injection if preferred.
+    const role = options.role === 'system' ? 0 : 1;
+    context.setExtensionPrompt(SCE_PROMPT_ID, sceFormatPrompt(result), 1, 0, false, role);
+    const label = typeof document !== 'undefined' && document.getElementById('sce_last_roll');
+    if (label) label.textContent = 'Latest roll: ' + result.roll + ' · ' + result.creative_mode;
+    console.debug('[Story Chaos Engine] Automatic seed injected.');
+};
+
+function sceSyncTool(context = globalThis.SillyTavern?.getContext?.()) {
+    if (!context) return;
+    const wanted = sceSettings(context).mode === 'tool';
+    if (wanted && !sceToolRegistered) {
+        register();
+        sceToolRegistered = true;
+    } else if (!wanted && sceToolRegistered) {
+        context.unregisterFunctionTool?.('story_chaos_roll');
+        sceToolRegistered = false;
+    }
+}
+
+function sceInit() {
+    const context = globalThis.SillyTavern?.getContext?.();
+    if (!context) return;
+    const settings = sceSettings(context);
+    sceSyncTool(context);
+    const root = typeof document !== 'undefined' && document.getElementById('extensions_settings');
+    if (!root || document.getElementById('sce_settings')) return;
+    const panel = document.createElement('div');
+    panel.id = 'sce_settings';
+    panel.innerHTML = [
+        '<details style="border:1px solid var(--SmartThemeBorderColor);padding:.7em;margin:.5em 0;border-radius:6px">',
+        '<summary style="cursor:pointer;font-weight:bold">🎲 Story Chaos Engine · v1.2.0</summary>',
+        '<div style="display:flex;flex-direction:column;gap:.6em;padding-top:.8em">',
+        '<label for="sce_mode">Mode</label>',
+        '<select id="sce_mode" class="text_pole">',
+        '<option value="automatic">Automatic prompt injection (Gemini workaround)</option>',
+        '<option value="tool">Legacy function calling</option>',
+        '<option value="off">Off</option></select>',
+        '<label for="sce_role">Automatic injection role</label>',
+        '<select id="sce_role" class="text_pole">',
+        '<option value="user">User role (Gemini proxy-friendly)</option>',
+        '<option value="system">System role</option></select>',
+        '<small>Automatic mode rolls once per normal generation, without a tool call. Remove the old "call story_chaos_roll" instruction from your prompts.</small>',
+        '<small id="sce_last_roll">No rolls this session.</small>',
+        '</div></details>',
+    ].join('');
+    root.appendChild(panel);
+    const modeSelect = panel.querySelector('#sce_mode');
+    const roleSelect = panel.querySelector('#sce_role');
+    modeSelect.value = settings.mode;
+    roleSelect.value = settings.role;
+    modeSelect.addEventListener('change', () => {
+        settings.mode = modeSelect.value;
+        sceClearPrompt(context);
+        sceSyncTool(context);
+        context.saveSettingsDebounced?.();
+    });
+    roleSelect.addEventListener('change', () => {
+        settings.role = roleSelect.value;
+        context.saveSettingsDebounced?.();
+    });
+    console.info('[Story Chaos Engine] v1.2.0 initialized:', settings.mode);
+}
+
+// The default mode does NOT register a function tool, even when function
+// calling is enabled for other extensions.
+if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', sceInit, { once: true });
+    } else {
+        sceInit();
+    }
+}
