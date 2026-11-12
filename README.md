@@ -1,5 +1,64 @@
 # Story Chaos Engine 🎲
 
+## New in v1.6.0: Closing-Beat Watch 🔁
+
+**This release fixes a blind spot in Structural Feedback:** the Observer could identify paragraph/quotation patterns, but not a character repeatedly doing the same thing near the end of every reply. Changing abstract structures cannot, by itself, prevent that recurring behavior.
+
+The **Closing-Beat Watch** is a separate, optional local detector that looks for repeated *recognizable closing actions* and repeated *literal three-token sequences* in recent completed assistant replies. It operates before the next normal generation, so the entire creative roll, structural blueprint, and any measured repetition note still travel in **one ordinary Gemini request**.
+
+### Activation
+
+1. Update Story Chaos Engine and reload SillyTavern.
+2. In **🎲 Story Chaos Engine → 📊 Structural Feedback → 🔁 Closing-Beat Watch**, enable **Watch recurring closing actions**.
+3. Start with **Ending-repeat avoidance strength 85%**, **last 8 responses**, and **3 matching replies**.
+4. Click **Analyze current replies**. It reports a recurring closing motif when enough evidence is available.
+5. Keep **Structural Entropy** on. At **Structure influence 80–90%**, the injected blueprint now explicitly asks for a visibly different narrative arrangement rather than merely offering background inspiration.
+
+**Closing-Beat Watch is off by default on upgrade.** It does not require the Structural Observer or empirical Balancer to be enabled. If the Balancer is already on, it continues to operate independently.
+
+### Example: recurring texting endings
+
+If the last several assistant replies end with variations of *Bonnie texting someone*, the watcher can find a repeated actor + messaging activity even when the exact wording changes: *texted*, *sent a message*, *typed out a text*, *messaged someone*.
+
+The injected note will say, in effect:
+
+```text
+[ENDING-PATTERN WATCH: MEASURED REPETITION, NOT A STORY DIRECTIVE]
+Observed pattern in recent closing passages:
+Bonnie + text or message activity (4 of 8 completed assistant replies).
+
+For the next response, do not default to this same closing behavior.
+Let existing motives and circumstances decide what actually happens and how it ends.
+Do not merely relocate the same behavior to an earlier paragraph or
+another character, and don't force the opposite.
+...
+```
+
+
+This is **not** a prohibition on characters texting. If the user's latest turn explicitly asks for the same action, or continuity requires it, the engine suppresses or softens its nudge and the story can continue normally.
+
+### Objectivity and limitations
+
+- There is **no special rule for Bonnie or texting**. The watcher uses the same frequencies and recency threshold for all recognized activities, including hugging, calling, laughing, kissing, drinking, leaving, sighing, asking questions, and more.
+- It analyzes the last **two paragraphs**, within a bounded character range, of each sampled completed assistant reply. User messages, system messages, and tool results are excluded.
+- A recurrence must reach the selected count threshold **and** appear in at least **two of the three most recent eligible replies**. This avoids treating an old pattern as current.
+- It also detects repeated literal three-token snippets, using simple word normalization, for behaviors outside its fixed action vocabulary.
+- The analysis is **lexical, not semantic**. Mentioning a text message is not necessarily sending one. Pronouns, nuanced paraphrases, and narration without an explicit actor can be missed or misclassified. It does not pretend to infer true intent, causation, quality, or the morality of a character's behavior.
+- It offers a **bounded corrective hint**, not a hard ban or a mandate to create action. The model may ignore it, especially if stronger or conflicting instructions are present.
+- It preserves the existing **depth-0 automatic prompt injection**, incurs **zero additional model/API requests**, and doesn't edit saved chat history.
+
+### Why Structure Influence now matters more
+
+Previously, Structure Influence mainly affected family selection and called the resulting blueprint a "strong preference." In v1.6, it also changes the **execution wording**:
+
+- **Below 50**: gentle influence, free-form authoring.
+- **50–79**: ask the model to make the selected architecture recognizable without inventing forced plot events.
+- **80–100**: ask the model to visibly organize the reply according to the selected structure rather than its habitual reaction-dialogue-closing pattern.
+
+These are still flexible writing directions, not mandatory paragraph counts. Keep your main prompt's length/formatting requirements, and remove other fixed beat templates that conflict with Structural Entropy.
+
+---
+
 ## New in v1.5.0: Neutral Structural Observer + optional Balancer 📊
 
 **Structural Feedback is an opt-in, on-device feedback loop.** The extension examines completed model replies *before the next generation*, measures mechanical writing patterns, and can adjust later Structural Entropy rolls based on **observed associations**, not a built-in literary taste.
