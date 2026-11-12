@@ -66,10 +66,10 @@ async function roll(result,kind='normal') {
 }
 function countLayers(prompt) { return (prompt.match(/Optional lens \[/g)||[]).length; }
 
-test('manifest is installable and advertises v1.3.0 and CSS',()=>{
+test('manifest is installable and advertises v1.7.0 and CSS',()=>{
     assert.equal(manifest.js,'index.js');
     assert.equal(manifest.css,'style.css');
-    assert.equal(manifest.version,'1.6.0');
+    assert.equal(manifest.version,'1.7.0');
     assert.equal(manifest.generate_interceptor,'storyChaosEngineInterceptor');
     assert.ok(fs.existsSync(path.join(root,'style.css')));
 });
@@ -188,7 +188,7 @@ test('settings panel renders category controls and preview without an API reques
     assert.ok(advanced,'advanced controls are appended');
     assert.match(advanced.innerHTML,/sce_intensity/);
     assert.match(advanced.innerHTML,/sce_gravity/);
-    assert.match(advanced.innerHTML,/sce_keywords/);
+    assert.match(panel.innerHTML,/sce_keywords/);
     assert.match(advanced.innerHTML,/sce_cat_setting/);
     const slider=b.doc.cache.get('#sce_intensity');
     slider.value='100';

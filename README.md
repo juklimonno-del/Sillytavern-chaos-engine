@@ -1,5 +1,49 @@
 # Story Chaos Engine 🎲
 
+## New in v1.7.0: Reliability + Autopilot + completion receipts ✅
+
+**Upgrade without losing your knobs.** The eleven creative-category weights, ten structural
+families, custom keywords, keyword influence, and advanced controls are retained. New
+**Autopilot** is opt-in on upgrade: it activates structural variation, feedback sampling,
+the balancing loop and Closing-Beat Watch together, without overwriting individual advanced
+feature settings. Turning it off restores their existing on/off behavior. The simple panel
+keeps the keyword bank and influence slider visible; advanced controls are folded away.
+Choose Subtle, Balanced or Wild to apply a starting set of tuning values. A preset changes
+the numerical controls only when you explicitly select it, and never rewrites the keyword
+bank or category weights.
+
+**After a response completes**, SillyTavern's assistant-message-rendered event updates
+a per-chat status line with a completion receipt. If **Brief completion notifications**
+is on, a short toast appears. The receipt verifies that the engine injected guidance
+and SillyTavern rendered a subsequent assistant reply; **it does not prove the model
+followed every suggestion**. It can independently flag repeated endings measured in
+the completed reply history. Stopped or failed generations are never marked completed.
+Notifications can be disabled without disabling analysis.
+
+### v1.7 technical improvements
+
+- Context cache checks full sampled message-body hashes; earlier edits and same-length
+  swipes can no longer silently reuse an obsolete word bank.
+- Internal tracker, thinking and analysis markup is stripped from lexical/structural
+  sampling, without deleting ordinary narration.
+- The ending detector now distinguishes *reading a message* from *sending one* and declines
+  actor attribution when multiple names make a clause ambiguous.
+- Closing-Beat Watch no longer constructs unused structural fingerprints. Reused response
+  fingerprints are cached and invalidated after edits.
+- Previously calculated creative focus, optional pacing and wildcard fields now reach the
+  generation prompt rather than being thrown away.
+- Generation preparation catches failures, clears old injection state, and leaves ordinary
+  generation unblocked.
+- The completion receipt uses standard SillyTavern events and adds no extra model calls.
+
+**Known limits:** lexical detection remains heuristic; a new sentence can mean the same
+story beat, and a different grammatical description may evade the watcher. The adaptive
+balancer still only learns mechanical structural traits and resets on browser reload.
+For now, semantic understanding remains outside the lightweight default extension.
+
+---
+
+
 ## New in v1.6.0: Closing-Beat Watch 🔁
 
 **This release fixes a blind spot in Structural Feedback:** the Observer could identify paragraph/quotation patterns, but not a character repeatedly doing the same thing near the end of every reply. Changing abstract structures cannot, by itself, prevent that recurring behavior.
