@@ -6,9 +6,9 @@ const {boot,prepare,attachReply,finish,complete,assistant:a,user:u,texted,source
 const obj=x=>JSON.parse(JSON.stringify(x));
 const all=(defs,on=[])=>Object.fromEntries(Object.keys(defs).map(k=>[k,on.includes(k)?3:0]));
 
-test('1.8.0 manifest loads the lifecycle entry point and local-only engine',()=>{
+test('1.8.3 manifest loads the lifecycle entry point and local-only engine',()=>{
     const m=JSON.parse(fs.readFileSync(path.join(__dirname,'..','manifest.json')));
-    assert.equal(m.version,'1.8.0');assert.equal(m.js,'entry.js');assert.equal(m.hooks.disable,'onDisable');
+    assert.equal(m.version,'1.8.3');assert.equal(m.js,'entry.js');assert.equal(m.hooks.disable,'onDisable');
     assert.equal(m.generate_interceptor,'storyChaosEngineInterceptor');assert.doesNotMatch(source,/\bfetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon/);
 });
 test('existing keyword bank, weights, operating mode and role survive migration',()=>{
@@ -97,7 +97,7 @@ test('preview includes the same eligible closing-watch section without consuming
 });
 test('the compact packet stays bounded with all features and maximum lenses',()=>{
     const b=boot({autopilotEnabled:true,intensity:100,maxLayers:5,structureInfluence:95,beatDensity:100},texted());
-    for(let i=0;i<40;i++){const p=b.api.packet(b.context,true);assert.ok(p.words<=250,'words='+p.words);assert.match(p.prompt,/Preserve continuity/);}
+    for(let i=0;i<40;i++){const p=b.api.packet(b.context,true);assert.ok(p.words<=250,'words='+p.words);assert.match(p.prompt,/Honor continuity/);}
 });
 test('pacing lenses refine, rather than contradict, selected architecture',()=>{
     const b=boot({structureEnabled:true,intensity:0});b.api.settings(b.context).categoryWeights=all(b.api.categories,['pacing']);
@@ -105,7 +105,7 @@ test('pacing lenses refine, rather than contradict, selected architecture',()=>{
 });
 for(const id of ['sustained','domino','parallel','echo','dialogue','pivot','anticlimax','mosaic','reverse','time'])
     test('structural blueprint remains internally consistent for '+id,()=>{
-        const b=boot({structureEnabled:true,beatDensity:80});b.api.settings(b.context).structureWeights=all(b.api.families,[id]);
+        const b=boot({structureEnabled:true,beatDensity:80,cuePalette:'everyday'});b.api.settings(b.context).structureWeights=all(b.api.families,[id]);
         for(let i=0;i<20;i++){const r=b.api.structural(b.context);assert.equal(r.familyId,id);assert.equal(r.beats.length,r.count);assert.equal(r.attention.length,r.count);assert.ok(r.beats.every(x=>x.role));}
     });
 for(const size of [1,2,4,5,10,18])test('soft structural recency keeps '+size+' enabled families available without a forced cycle',()=>{

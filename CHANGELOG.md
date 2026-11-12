@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.8.3 — November 12, 2026
+
+Packet format and tone release. No change to host lifecycle, completion receipts, learning, or storage.
+
+- Deliver guidance as a scoped `<scene_direction>` block in positive, imperative language. Remove the Chaos Engine branding, bracket headers, numeric attention ratios, and hedged or negative phrasing from the model-facing text. The run marker moves into the block’s `id` attribute.
+- Open every packet with one line that holds the scene’s established tone and intensity.
+- Add a **Cue palette** setting: Neutral (default, applied to existing installations), Intense, and Everyday (the unchanged 1.8.0 library). Neutral and Intense drop cues, structure phases and closing suggestions written to deflate tension, skip the Deliberate anti-climax and Elastic time structures and the humor category, and reduce wildcards; Intense adds stakes and consequence cues. Palettes apply multipliers at selection time and never rewrite saved weights.
+- Exclude numerals and other function-like words from context anchors and optional words.
+- Add `tests/palette183.test.cjs`, including checks that Neutral and Intense never deliver deflating wording in a dark-scene fixture. Update packet-format assertions in the existing suites.
+- Ignore Python bytecode caches in Git.
+
 ## 1.8.0 — November 12, 2026
 
 Structural Entropy expansion based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. [Release pull request #3](https://github.com/juklimonno-del/Sillytavern-chaos-engine/pull/3) and its checks record repository integration and current validation.

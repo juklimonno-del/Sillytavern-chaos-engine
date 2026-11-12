@@ -1,10 +1,18 @@
-# Story Chaos Engine 1.8.0
+# Story Chaos Engine 1.8.3
 
 Browser-side creative guidance for SillyTavern. One ordinary model request, one depth-zero injection, no additional inference service, analytics, or API key.
 
-**Release:** 1.8.0 Structural Entropy expansion, based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. [Release pull request #3](https://github.com/juklimonno-del/Sillytavern-chaos-engine/pull/3) and its GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.0 test results.
+**Release:** 1.8.3 packet-format and tone update on top of the 1.8.0 Structural Entropy expansion, itself based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. The release pull request and its GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.x test results.
 
-## What changed
+## What changed in 1.8.3
+
+The injected packet is now a scoped `<scene_direction>` block written in positive, imperative language. It no longer carries the Chaos Engine name, bracket headers, numeric attention ratios, or hedges such as “not facts” and “skip conflicts”. The run marker stays in the block’s `id` attribute for request observation. A single opening line asks the model to hold the scene’s established tone and intensity.
+
+A new **Cue palette** controls the tone of the built-in cue library. **Neutral** is the default and applies to existing installations without any panel action: it drops cues written to deflate tension (mundane inconveniences, petty or comic detours, anti-climax, “not a hook” endings), skips the Deliberate anti-climax and Elastic time structures and the humor category, and halves wildcards. **Intense** does the same and adds stakes and consequence cues. **Everyday** restores the unchanged 1.8.0 library. A palette applies multipliers at selection time; it never rewrites saved category or family weights.
+
+Context anchors and optional words no longer pick function-like words such as numerals, “tell”, “until” and “closer”.
+
+## What changed in 1.8.0
 
 Structural Entropy expands from ten to eighteen families. The eight additions have multiple coherent routes through their phases; attention profiles vary how much emphasis each part receives, and selected transition instructions now appear in the injected packet. Existing density, influence, grounding, anti-repeat, and family-weight controls handle the expansion.
 
@@ -36,7 +44,7 @@ The script makes a timestamped backup beside the target directory, atomically re
 
 The deployable runtime files are `manifest.json`, `entry.js`, `index.js`, and `style.css`; retain `LICENSE`. A new manual installation can place those in one third-party extension folder. Do not enable two copies. For a manual update from the exact recorded v1.7.1 files, the applier preserves `.git` and unrelated files instead of replacing the whole directory. If it detects modified or newer files, reconcile those changes manually. Keep local changes backed up before using the host's updater again.
 
-Restart/reload SillyTavern and check that the panel says **v1.8.0**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
+Restart/reload SillyTavern and check that the panel says **v1.8.3**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
 
 ## Controls that mean what they say
 
@@ -88,7 +96,7 @@ Legacy function-tool mode is retained, uses fresh current-chat context, and expl
 
 ## Analysis and low-reasoning models
 
-The injected packet is bounded to 250 whitespace-separated words in the shipped cue vocabulary. It contains one architecture, a shared-budget selection of creative lenses, optional words, one contextual anchor at most, and an evidence-qualified correction when appropriate. A correction takes precedence over a separate closing suggestion. Pacing refines the chosen architecture rather than independently contradicting it.
+The injected packet is bounded to 250 whitespace-separated words in the shipped cue vocabulary. It contains one architecture, a shared-budget selection of creative lenses, words in play, one contextual anchor at most, and an evidence-qualified correction when appropriate. A correction takes precedence over a separate closing suggestion. Pacing refines the chosen architecture rather than independently contradicting it.
 
 Keep your short main-prompt instruction to interpret the packet. The extension does not request verbose visible planning, alter the model's reasoning parameter, or call a second model.
 
