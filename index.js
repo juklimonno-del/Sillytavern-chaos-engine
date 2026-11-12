@@ -279,14 +279,14 @@ function sceSetReceipt(context, receipt) {
 }
 function sceReceiptText(receipt) {
     if (!receipt) return 'No generated reply checked this session.';
-    if (receipt.state==='prepared') return 'Preparing reply · guidance injected; awaiting completion.';
+    if (receipt.state==='prepared') return 'Preparing reply · guidance installed; awaiting completion.';
     if (receipt.state==='stopped') return 'Generation stopped · no completed reply verified.';
     if (receipt.state==='error') return 'Extension fallback · guidance unavailable for this turn.';
     const details=[receipt.layers+' creative lens(es)'];
     if (receipt.structure) details.push(receipt.structure);
     if (receipt.closingHint) details.push('repetition nudge sent');
     if (receipt.repeatLabel) details.push('recurring ending: '+receipt.repeatLabel);
-    return '✓ Reply completed, guidance delivered · '+details.join(' · ');
+    return '✓ Reply completed after Chaos guidance was installed · '+details.join(' · ');
 }
 function sceRenderReceipt(context = globalThis.SillyTavern?.getContext?.()) {
     if (typeof document==='undefined') return;
@@ -320,7 +320,7 @@ function sceHandleReplyRendered(messageId,type) {
     sceSetReceipt(context,finished);
     const options=sceSettings(context);
     if (options.notifyAfterReply && typeof globalThis.toastr?.info==='function') {
-        const summary='🎲 Guidance sent; reply completed ('+actual.wordCount+' words)' +
+        const summary='🎲 Reply finished after Chaos guidance ('+actual.wordCount+' words)' +
             (repeating?' · recurring ending detected':'');
         globalThis.toastr.info(summary,'Story Chaos Engine',{
             timeOut:2400,extendedTimeOut:1000,preventDuplicates:true,progressBar:false,
@@ -540,8 +540,19 @@ function sceWordIndex(context) {
             nearby.set(word,co);
         }
     }
-    const options=[...counts].map(([value,count])=>
-        ({value,weight:Math.min(16,1+Math.log2(1+count)*2)}));
+    // Familiar context remains eligible, but repetitive nouns don't monopolize
+    // every new random anchor. A small lexical novelty penalty is symmetric.
+    const recentAssist=records.filter(x=>chat[x.index]?.is_user===false).slice(0,8);
+    const documentFrequency=new Map();
+    for(const rec of recentAssist) {
+        for(const word of new Set(sceTokenize(sceStoryText(rec.raw))))
+            documentFrequency.set(word,(documentFrequency.get(word)||0)+1);
+    }
+    const options=[...counts].map(([value,count])=>{
+        const fraction=(documentFrequency.get(value)||0)/Math.max(1,recentAssist.length);
+        const weight=Math.min(16,1+Math.log2(1+count)*2)*(1-0.55*fraction);
+        return {value,weight};
+    });
     const index={options,nearby,recent,analyzed:records.length};
     sceWordIndexCache.set(key,{signature,index});
     if (sceWordIndexCache.size>8) sceWordIndexCache.delete(sceWordIndexCache.keys().next().value);
@@ -959,11 +970,18 @@ function sceFeedbackHash(text) {
     return (hash >>> 0).toString(16) + ':' + text.length;
 }
 function sceFeedbackTextTokens(text) {
-    return (String(text).toLocaleLowerCase().match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) || []).slice(0, 2200);
+    const tokens=String(text).toLocaleLowerCase().match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)||[];
+    if(tokens.length<=2200)return tokens;
+    // Keep actual opening and closing tokens even in very long completions.
+    return [...tokens.slice(0,1100),'__truncated__',...tokens.slice(-1099)];
 }
 function sceFeedbackFingerprint(messageOrText) {
     const raw = typeof messageOrText === 'string' ? messageOrText : messageOrText?.mes || '';
-    const text = sceStoryText(raw).slice(-16000);
+    const plain=sceStoryText(raw);
+    // Sample both edges, rather than incorrectly treating an early truncation
+    // point as the actual reply ending.
+    const text=plain.length<=16000 ? plain :
+        plain.slice(0,8000)+'\n\n'+plain.slice(-8000);
     const tokens = sceFeedbackTextTokens(text);
     const blocks = text.trim().split(/\n\s*\n+/u).filter(x => x.trim());
     const sizes = blocks.map(x => sceFeedbackTextTokens(x).length);
@@ -992,7 +1010,8 @@ function sceFeedbackFingerprint(messageOrText) {
         terminal === '…' ? 'ellipsis' : 'other';
     const phrases = new Set();
     for (let i=0; i<tokens.length-3; i++) {
-        phrases.add(tokens.slice(i,i+4).join(' '));
+        if (!tokens.slice(i,i+4).includes('__truncated__'))
+            phrases.add(tokens.slice(i,i+4).join(' '));
     }
     return {
         signature: sceFeedbackHash(raw),
