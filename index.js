@@ -297,6 +297,10 @@ function sceRenderReceipt(context = globalThis.SillyTavern?.getContext?.()) {
     if (el.dataset) el.dataset.state=receipt?.state||'idle';
 }
 function sceReplyRendered(messageId,type) {
+    try { sceHandleReplyRendered(messageId,type); }
+    catch(error) { console.warn('[Story Chaos Engine] Receipt update failed.',error); }
+}
+function sceHandleReplyRendered(messageId,type) {
     const context=globalThis.SillyTavern?.getContext?.();
     if (!context || type==='first_message' || type==='impersonate') return;
     const receipt=sceRunReceipt(context);
@@ -1702,6 +1706,8 @@ function sceInit() {
         '</div></details>',
     ].join('');
     root.appendChild(panel);
+    // Advanced controls must exist before querying the mode and role fields.
+    sceAdvancedUI(panel, settings);
     const modeSelect = panel.querySelector('#sce_mode');
     const roleSelect = panel.querySelector('#sce_role');
     modeSelect.value = settings.mode;
@@ -1715,9 +1721,11 @@ function sceInit() {
     autopilot.checked=settings.autopilotEnabled;
     autopilot.addEventListener('change',e=>{
         settings.autopilotEnabled=e.target.checked;
-        if (e.target.checked && settings.mode==='off') {
+        if (e.target.checked && settings.mode!=='automatic') {
             settings.mode='automatic';
             modeSelect.value=settings.mode;
+            sceSyncTool(context);
+            sceClearPrompt(context);
         }
         context.saveSettingsDebounced?.();
     });
@@ -1761,6 +1769,10 @@ function sceInit() {
     });
     modeSelect.addEventListener('change', () => {
         settings.mode = modeSelect.value;
+        if (settings.mode!=='automatic') {
+            settings.autopilotEnabled=false;
+            autopilot.checked=false;
+        }
         sceClearPrompt(context);
         sceSyncTool(context);
         context.saveSettingsDebounced?.();
@@ -1769,7 +1781,6 @@ function sceInit() {
         settings.role = roleSelect.value;
         context.saveSettingsDebounced?.();
     });
-    sceAdvancedUI(panel, settings);
     sceStructureUI(panel, settings);
     sceFeedbackUI(panel, settings);
     sceRenderReceipt(context);
