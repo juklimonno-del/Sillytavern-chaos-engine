@@ -908,19 +908,29 @@ function sceFeedbackFingerprint(messageOrText) {
         fourGrams: phrases,
     };
 }
-function sceFeedbackReplySamples(context, window, type='normal') {
+const SCE_REPLY_FINGERPRINT_CACHE = new WeakMap();
+function sceFeedbackReplyEntries(context, window, type='normal') {
     const chat = Array.isArray(context?.chat) ? context.chat : [];
     const entries = [];
-    for (let i=0; i<chat.length; i++) {
-        if (sceFeedbackMessageEligible(chat[i])) {
-            entries.push({index:i, message:chat[i]});
-        }
-    }
-    // When swiping/regenerating, the last assistant reply is the one being
-    // replaced; exclude it rather than measuring a soon-to-be-discarded reply.
-    if ((type === 'swipe' || type === 'regenerate') && entries.length) entries.pop();
-    return entries.slice(-window).map(x=>({...x, fingerprint:sceFeedbackFingerprint(x.message)}));
+    for (let i=0;i<chat.length;i++)
+        if (sceFeedbackMessageEligible(chat[i])) entries.push({index:i,message:chat[i]});
+    // A regenerating/swiping reply is about to be replaced, not evidence.
+    if ((type==='swipe'||type==='regenerate') && entries.length) entries.pop();
+    return entries.slice(-window);
 }
+function sceFeedbackCachedFingerprint(message) {
+    const signature = sceFeedbackHash(message?.mes || '');
+    const cached = SCE_REPLY_FINGERPRINT_CACHE.get(message);
+    if (cached?.signature===signature) return cached.fingerprint;
+    const fingerprint=sceFeedbackFingerprint(message);
+    SCE_REPLY_FINGERPRINT_CACHE.set(message,{signature,fingerprint});
+    return fingerprint;
+}
+function sceFeedbackReplySamples(context, window, type='normal') {
+    return sceFeedbackReplyEntries(context,window,type)
+        .map(x=>({...x,fingerprint:sceFeedbackCachedFingerprint(x.message)}));
+}
+
 function sceFeedbackDominant(samples) {
     if (samples.length < 4) return [];
     const results = [];
@@ -1143,8 +1153,8 @@ const SCE_ENDING_STOP = new Set(('a an the another and or but so then after befo
 const SCE_ENDING_ACTIONS = [
     {id:'messaging',label:'text or message activity',
         patterns:[
-            /\b(?:text(?:s|ed|ing)?|messag(?:e|es|ed|ing)|dms?|dm(?:ed|ing)|sms)\b/giu,
-            /\b(?:send|sends|sent|sending|wrot(?:e|ing)|writ(?:e|es|ing)|typ(?:e|es|ed|ing)|fir(?:e|es|ed|ing))\b.{0,85}\b(?:text|message|dm|sms)\b/giu
+            /\b(?:texted|texting|texts|messaged|messaging|dmed|dming)\b/giu,
+            /\b(?:send|sends|sent|sending|wrote|write|writes|writing|type|types|typed|typing|draft|drafted|forwarded)\b.{0,85}\b(?:text|message|dm|sms)\b/giu
         ]},
     {id:'calling',label:'calls or dialing',
         patterns:[/\b(?:call(?:s|ed|ing)?|dial(?:s|ed|ing)?|voicemail)\b/giu]},
@@ -1166,18 +1176,24 @@ const SCE_ENDING_ACTIONS = [
     {id:'waiting',label:'waiting',patterns:[/\b(?:wait(?:s|ed|ing)?|linger(?:s|ed|ing)?)\b/giu]},
 ];
 function sceEndingTail(text) {
-    const plain=String(text||'').replace(/<[^>]*>/gu,' ').trim();
+    const plain=sceStoryText(text).trim();
     const paragraphs=plain.split(/\n\s*\n+/u).filter(Boolean);
-    // Look at the final two paragraphs, capped for predictable mobile cost.
-    return paragraphs.slice(-2).join(' ').slice(-520);
+    return paragraphs.slice(-2).join(' ').slice(-720);
 }
-function sceEndingNamedActor(tail, at) {
-    const preceding=tail.slice(Math.max(0,at-120),at);
-    const names=[...preceding.matchAll(/\b[A-Z][a-z]{2,}(?:['’-][A-Za-z]+)?\b/gu)]
-        .map(match=>match[0].replace(/['’]s$/u,''))
+function sceEndingNamedActor(tail,at) {
+    const preceding=tail.slice(Math.max(0,at-160),at);
+    const clause=preceding.split(/[.!?;\n]/u).pop() || '';
+    const names=part=>[...part.matchAll(/(?:^|[^\p{L}])(\p{Lu}\p{L}{1,}(?:['’-]\p{L}+)?)/gu)]
+        .map(match=>match[1].replace(/['’]s$/u,''))
         .filter(name=>!SCE_ENDING_NAMES_IGNORE.has(name.toLocaleLowerCase()));
-    return names.length ? names[names.length-1] : null;
+    let candidates=names(clause);
+    // Resolve simple pronouns only when one uniquely named actor is nearby.
+    if(!candidates.length && /\b(?:she|he|they)\b/iu.test(clause))
+        candidates=names(preceding);
+    const unique=[...new Set(candidates.map(x=>x.toLocaleLowerCase()))];
+    return unique.length===1 ? candidates.find(x=>x.toLocaleLowerCase()===unique[0]) : null;
 }
+
 function sceEndingNormalizedToken(token) {
     const t=String(token).toLocaleLowerCase();
     if (/^(?:texts?|texted|texting|messages?|messaged|messaging|dms?|dming|dmed)$/u.test(t)) return 'message';
@@ -1187,6 +1203,7 @@ function sceEndingNormalizedToken(token) {
     if (/^(?:looks?|looked|looking)$/u.test(t)) return 'look';
     if (/^(?:laughs?|laughed|laughing)$/u.test(t)) return 'laugh';
     if (/^(?:walks?|walked|walking)$/u.test(t)) return 'walk';
+    if (SCE_ENDING_STOP.has(t)) return t;
     return t.replace(/(?:ing|ed|s)$/u, '') || t;
 }
 function sceEndingMotifs(text) {
@@ -1214,6 +1231,7 @@ function sceEndingMotifs(text) {
     // Generic fallback: repeated exact 3-word sequences after simple, symmetric
     // normalization. It can match actions outside our finite activity lexicon.
     const normalized=sceFeedbackTextTokens(tail)
+        .filter(t=>!SCE_ENDING_STOP.has(t))
         .map(sceEndingNormalizedToken).filter(t=>t.length>2 && !SCE_ENDING_STOP.has(t));
     const ending=normalized.slice(-30);
     for(let i=0;i+2<ending.length;i++) {
@@ -1227,7 +1245,7 @@ function sceEndingMotifs(text) {
 function sceEndingWatch(context,type='normal') {
     const options=sceSettings(context);
     if (!sceOn(options, 'endingWatchEnabled') || options.endingWatchStrength<=0) return null;
-    const samples=sceFeedbackReplySamples(context,options.endingWatchWindow,type);
+    const samples=sceFeedbackReplyEntries(context,options.endingWatchWindow,type);
     if(samples.length<4) return null;
     const detected=new Map();
     const recent = samples.slice(-3);
@@ -1251,7 +1269,11 @@ function sceEndingWatch(context,type='normal') {
     // most recent user turn; user authorship outweighs the repetition nudge.
     const chat=Array.isArray(context?.chat)?context.chat:[];
     const lastUser=[...chat].reverse().find(x=>x?.is_user===true && typeof x.mes==='string');
-    const requested=lastUser?new Set(sceEndingMotifs(lastUser.mes).map(x=>x.key)):new Set();
+    // Negated instructions such as "don't text" must not cancel the nudge.
+    const userText=sceStoryText(lastUser?.mes ?? '');
+    const negated=/\b(?:don't|do not|never|stop|avoid|not to)\b.{0,80}\b(?:text|message|call|hug|kiss|leave|laugh)\b/iu.test(userText);
+    const requested=lastUser&&!negated ?
+        new Set(sceEndingMotifs(lastUser.mes).map(x=>x.key)) : new Set();
     const available=eligible.filter(x=>!requested.has(x.key) &&
         !(x.kind==='activity' && requested.has('act:'+x.group)));
     if(!available.length)return null;
