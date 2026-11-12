@@ -1,0 +1,27 @@
+name: v1.7.1 staging verification
+on:
+  push:
+    branches: [release/v1.7.1-audit-fixes]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check index.js && node --test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-${{ github.sha }}
+          retention-days: 3
+          include-hidden-files: true
+          path: |
+            index.js
+            manifest.json
+            README.md
+            style.css
+            tests/
+            .github/workflows/test.yml
