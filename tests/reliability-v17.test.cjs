@@ -39,7 +39,7 @@ function boot(opts={}, messages=[], withUI=false) {
         Uint32Array,Intl,document:doc,toastr:{info(...a){notices.push(a);}},
         console:{info(){},warn(){},debug(){},error(){}},};
     scope.globalThis=scope;
-    vm.runInNewContext(source+'\nglobalThis.__v17={story:sceStoryText, index:sceWordIndex,'+
+    vm.runInNewContext(source+'\nglobalThis.__v17={story:sceStoryText, index:sceWordIndex, fingerprint:sceFeedbackFingerprint,'+
         'watch:sceEndingWatch,motifs:sceEndingMotifs,receipt:sceRunReceipt,'+
         'settings:sceSettings,init:sceInit};',scope,{filename:'index.js'});
     return {context,scope,eventSource,injected,notices,domNodes,root,tools:scope.__v17};
@@ -127,7 +127,7 @@ test('a rendered assistant reply completes its matching generation receipt exact
     b.eventSource.emit('rendered',1,'normal');
     assert.equal(b.tools.receipt(b.context).state,'completed');
     assert.equal(b.notices.length,1);
-    assert.match(b.notices[0][0],/Guidance sent; reply completed/);
+    assert.match(b.notices[0][0],/Reply finished after Chaos guidance/);
     b.eventSource.emit('rendered',1,'normal');
     assert.equal(b.notices.length,1);
 });
@@ -183,4 +183,33 @@ test('explicit preset selection updates safe tuning without rewriting category w
     assert.equal(settings.intensity,90);
     assert.equal(settings.maxLayers,4);
     assert.equal(settings.categoryWeights.humor,0);
+});
+
+
+test('long response fingerprints retain both true opening and closing words',()=>{
+    const b=boot();
+    const raw='Unmistakable opening tokens here. '+('ordinary middle text repeated here. '.repeat(900))+
+        'The final distinctive word is lantern!';
+    const fp=b.scope.__v17.fingerprint ? b.scope.__v17.fingerprint(raw) : null;
+    assert.ok(fp);
+    assert.match(fp.openingFour,/unmistakable opening/);
+    assert.match(fp.closingFour,/word is lantern/);
+});
+test('Autopilot turns legacy tool mode into normal automatic injection',()=>{
+    const b=boot({mode:'tool'},[],true);
+    const check=b.domNodes.get('#sce_autopilot');
+    check.checked=true;check.handlers.change({target:check});
+    assert.equal(b.tools.settings(b.context).mode,'automatic');
+    assert.equal(b.tools.settings(b.context).autopilotEnabled,true);
+});
+test('moving away from automatic mode explicitly disables the Autopilot indicator',()=>{
+    const b=boot({autopilotEnabled:true},[],true);
+    const select=b.domNodes.get('#sce_mode');
+    select.value='off';select.handlers.change({target:select});
+    assert.equal(b.tools.settings(b.context).autopilotEnabled,false);
+    assert.equal(b.domNodes.get('#sce_autopilot').checked,false);
+});
+test('initialization places advanced mode fields before selecting them',()=>{
+    assert.ok(source.indexOf('sceAdvancedUI(panel, settings);') <
+        source.indexOf("const modeSelect = panel.querySelector('#sce_mode');"));
 });
