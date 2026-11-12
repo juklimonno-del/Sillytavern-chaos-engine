@@ -196,6 +196,15 @@ function sceSettings(context = globalThis.SillyTavern?.getContext?.()) {
     settings.feedbackStrength = sceBound(settings.feedbackStrength, 65, 0, 100);
     if (![4, 8, 16].includes(Number(settings.feedbackWindow))) settings.feedbackWindow = 8;
     else settings.feedbackWindow = Number(settings.feedbackWindow);
+    for (const [name, defaultValue] of Object.entries(SCE_ENDING_WATCH_DEFAULTS)) {
+        if (settings[name] === undefined) settings[name] = defaultValue;
+    }
+    if (typeof settings.endingWatchEnabled !== 'boolean') settings.endingWatchEnabled = false;
+    settings.endingWatchStrength = sceBound(settings.endingWatchStrength, 70, 0, 100);
+    if (![4, 8, 16].includes(Number(settings.endingWatchWindow))) settings.endingWatchWindow = 8;
+    else settings.endingWatchWindow = Number(settings.endingWatchWindow);
+    if (![3, 4, 5].includes(Number(settings.endingWatchMinimum))) settings.endingWatchMinimum = 3;
+    else settings.endingWatchMinimum = Number(settings.endingWatchMinimum);
     return settings;
 }
 
@@ -239,10 +248,14 @@ globalThis.storyChaosEngineInterceptor = async function(_chat, _contextSize, _ab
         sceFeedbackReconcile(context, type || 'normal');
     }
     const structural = options.structureEnabled ? sceStructuralRoll(context, false, type || 'normal') : null;
+    // Ending-pattern detection is independent of Structural Entropy's
+    // statistical family balancer. It requires no matched roll history.
+    const endingWatch = options.endingWatchEnabled ?
+        sceEndingWatch(context, type || 'normal') : null;
     // Depth 0 in a USER role keeps Gemini proxies from ending the prompt on
     // a model turn. Users can switch to a system-role injection if preferred.
     const role = options.role === 'system' ? 0 : 1;
-    context.setExtensionPrompt(SCE_PROMPT_ID, sceFormatCombined(result, structural), 1, 0, false, role);
+    context.setExtensionPrompt(SCE_PROMPT_ID, sceFormatCombined(result, structural, endingWatch), 1, 0, false, role);
     if (options.structureEnabled && options.feedbackObserverEnabled && structural) {
         sceFeedbackPending(context, structural.familyId, type || 'normal');
     }
@@ -743,7 +756,13 @@ function sceFormatStructure(structure) {
     for (let i = 0; i < structure.beats.length; i++) {
         lines.push((i+1) + '. ' + structure.beats[i].role);
     }
+    const adherence = structure.influence >= 80
+        ? 'Strong execution: let this selected architecture visibly determine the next passage\'s distribution of attention. Use its distinct phases where continuity permits rather than falling back to a familiar reaction-dialogue-closing pattern.'
+        : structure.influence >= 50
+            ? 'Moderate execution: make the selected architecture recognizable in the next passage when consistent with the scene. Do not merely mention the idea and then follow the usual story rhythm.'
+            : 'Gentle execution: allow the selected architecture to influence the next passage without turning it into a rigid outline.';
     lines.push(
+        'Structure execution: ' + adherence,
         'Suggested closing behavior: ' + structure.ending,
         'Create actual events and character behavior only from the established fiction. No new user-character decisions or dialogue.',
         'Phases indicate distribution of narrative attention, not fixed events, required escalations, or a beat-by-beat outline.',
@@ -754,9 +773,11 @@ function sceFormatStructure(structure) {
     );
     return lines.join('\n');
 }
-function sceFormatCombined(creativeRoll, structure) {
-    const base = sceFormatPrompt(creativeRoll);
-    return structure ? base + '\n\n' + sceFormatStructure(structure) : base;
+function sceFormatCombined(creativeRoll, structure, endingWatch = null) {
+    const sections = [sceFormatPrompt(creativeRoll)];
+    if (structure) sections.push(sceFormatStructure(structure));
+    if (endingWatch) sections.push(sceFormatEndingWatch(endingWatch));
+    return sections.join('\n\n');
 }
 
 /* Neutral Structural Observer & optional empirical Balancer (v1.5).
@@ -1205,6 +1226,7 @@ function sceFormatEndingWatch(watch) {
             ? 'For the next response, do not default to this same closing behavior. Let existing motives and circumstances decide what actually happens and how it ends.'
             : 'For the next response, consider an ending that does not repeat this activity by habit, if the established scene allows it.',
         'Do not simply shift the same repeated action to another character or force a dramatic opposite.',
+        'If a separate structural ending suggestion conflicts with this measured repetition, prioritize avoiding the habitual repeat unless the story requires it.',
         'If the user explicitly requests or established continuity requires it, let the action occur normally.',
         'This is a lexical recurrence estimate, not a judgment of meaning, quality, morality, or character behavior.',
         'Do not mention the analysis in the fiction.',
