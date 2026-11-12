@@ -1,0 +1,88 @@
+{
+  "browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/144.0.0.0 Safari/537.36",
+  "tests": 20,
+  "passed": 20,
+  "failed": 0,
+  "results": [
+    {
+      "name": "real ESM manifest entry initializes actual DOM controls",
+      "passed": true
+    },
+    {
+      "name": "there are no duplicate control IDs",
+      "passed": true
+    },
+    {
+      "name": "default label is Custom and legacy keyword values survive",
+      "passed": true
+    },
+    {
+      "name": "selecting a preset does not apply it until Apply is clicked",
+      "passed": true
+    },
+    {
+      "name": "manual tuning displays Custom instead of a misleading preset",
+      "passed": true
+    },
+    {
+      "name": "explicit Off wins under Autopilot and effective-state text agrees",
+      "passed": true
+    },
+    {
+      "name": "keyword edit remains text and cannot inject HTML",
+      "passed": true
+    },
+    {
+      "name": "impossible minimum/window combination is corrected in the real select",
+      "passed": true
+    },
+    {
+      "name": "master Off prevents all prompt injection",
+      "passed": true
+    },
+    {
+      "name": "all creative categories Off permits keyword-only mode without hidden cues",
+      "passed": true
+    },
+    {
+      "name": "complete preview leaves prompt and histories untouched",
+      "passed": true
+    },
+    {
+      "name": "real lifecycle hooks are idempotent and retain exactly one subscription",
+      "passed": true
+    },
+    {
+      "name": "successful simulated stream is verified in real rendered UI",
+      "passed": true
+    },
+    {
+      "name": "stopping after render revokes green state and its toast",
+      "passed": true
+    },
+    {
+      "name": "host error path rendering a partial response never turns green",
+      "passed": true
+    },
+    {
+      "name": "render-before-end success also completes without duplicate notifications",
+      "passed": true
+    },
+    {
+      "name": "lifecycle disable removes UI/listeners and clears injection",
+      "passed": true
+    },
+    {
+      "name": "re-enable remounts actual controls without losing custom settings",
+      "passed": true
+    },
+    {
+      "name": "delayed host panel mount initializes through MutationObserver",
+      "passed": true
+    },
+    {
+      "name": "missing selectors return null rather than being fabricated by a mock",
+      "passed": true
+    }
+  ]
+}

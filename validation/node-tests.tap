@@ -1,0 +1,856 @@
+TAP version 13
+# Subtest: real Chromium DOM, ESM entry, settings, lifecycle and receipt smoke scenarios
+ok 1 - real Chromium DOM, ESM entry, settings, lifecycle and receipt smoke scenarios
+  ---
+  duration_ms: 847.443392
+  type: 'test'
+  ...
+# Subtest: automatic mode installs one combined depth-zero user prompt
+ok 2 - automatic mode installs one combined depth-zero user prompt
+  ---
+  duration_ms: 20.733865
+  type: 'test'
+  ...
+# Subtest: system-role override is preserved
+ok 3 - system-role override is preserved
+  ---
+  duration_ms: 3.083007
+  type: 'test'
+  ...
+# Subtest: quiet requests do not receive Chaos instructions
+ok 4 - quiet requests do not receive Chaos instructions
+  ---
+  duration_ms: 1.959166
+  type: 'test'
+  ...
+# Subtest: continue requests do not receive Chaos instructions
+ok 5 - continue requests do not receive Chaos instructions
+  ---
+  duration_ms: 1.983593
+  type: 'test'
+  ...
+# Subtest: impersonate requests do not receive Chaos instructions
+ok 6 - impersonate requests do not receive Chaos instructions
+  ---
+  duration_ms: 3.832745
+  type: 'test'
+  ...
+# Subtest: only installing guidance does not produce a completed receipt
+ok 7 - only installing guidance does not produce a completed receipt
+  ---
+  duration_ms: 2.731929
+  type: 'test'
+  ...
+# Subtest: rendering alone cannot verify completion
+ok 8 - rendering alone cannot verify completion
+  ---
+  duration_ms: 3.402067
+  type: 'test'
+  ...
+# Subtest: a successful stream can end before its rendered-message event
+ok 9 - a successful stream can end before its rendered-message event
+  ---
+  duration_ms: 8.617571
+  type: 'test'
+  ...
+# Subtest: a successful stream can render before the ended event
+ok 10 - a successful stream can render before the ended event
+  ---
+  duration_ms: 3.467375
+  type: 'test'
+  ...
+# Subtest: a non-streaming request requires matching prompt and generation timestamps
+ok 11 - a non-streaming request requires matching prompt and generation timestamps
+  ---
+  duration_ms: 4.666268
+  type: 'test'
+  ...
+# Subtest: a rendered non-streaming message with no completion metadata remains unverified
+ok 12 - a rendered non-streaming message with no completion metadata remains unverified
+  ---
+  duration_ms: 2.585638
+  type: 'test'
+  ...
+# Subtest: a failed partial stream that emits the normal rendered event is not certified
+ok 13 - a failed partial stream that emits the normal rendered event is not certified
+  ---
+  duration_ms: 3.126402
+  type: 'test'
+  ...
+# Subtest: stop before rendering remains stopped rather than becoming successful
+ok 14 - stop before rendering remains stopped rather than becoming successful
+  ---
+  duration_ms: 2.741934
+  type: 'test'
+  ...
+# Subtest: render-then-stop in the same task never emits a verified-completion toast
+ok 15 - render-then-stop in the same task never emits a verified-completion toast
+  ---
+  duration_ms: 5.585902
+  type: 'test'
+  ...
+# Subtest: a late stop revokes an existing receipt, toast and learning association
+ok 16 - a late stop revokes an existing receipt, toast and learning association
+  ---
+  duration_ms: 5.32632
+  type: 'test'
+  ...
+# Subtest: unchanged old swipe text cannot satisfy a new generation receipt
+ok 17 - unchanged old swipe text cannot satisfy a new generation receipt
+  ---
+  duration_ms: 3.318742
+  type: 'test'
+  ...
+# Subtest: rendering another message index does not complete the pending generation
+ok 18 - rendering another message index does not complete the pending generation
+  ---
+  duration_ms: 4.322902
+  type: 'test'
+  ...
+# Subtest: first-message and impersonation events cannot certify a normal reply
+ok 19 - first-message and impersonation events cannot certify a normal reply
+  ---
+  duration_ms: 4.053847
+  type: 'test'
+  ...
+# Subtest: stale generation timestamp cannot be certified as a new non-streaming reply
+ok 20 - stale generation timestamp cannot be certified as a new non-streaming reply
+  ---
+  duration_ms: 5.781035
+  type: 'test'
+  ...
+# Subtest: an old processor is not proof of a new request finishing
+ok 21 - an old processor is not proof of a new request finishing
+  ---
+  duration_ms: 2.582565
+  type: 'test'
+  ...
+# Subtest: a processor belonging to another message does not verify this request
+ok 22 - a processor belonging to another message does not verify this request
+  ---
+  duration_ms: 2.63924
+  type: 'test'
+  ...
+# Subtest: request abort signals invalidate otherwise complete-looking response events
+ok 23 - request abort signals invalidate otherwise complete-looking response events
+  ---
+  duration_ms: 2.899652
+  type: 'test'
+  ...
+# Subtest: failed requests with no response terminate as unverified rather than staying preparing
+ok 24 - failed requests with no response terminate as unverified rather than staying preparing
+  ---
+  duration_ms: 3.415026
+  type: 'test'
+  ...
+# Subtest: fresh generation ids prevent stale prior payloads from verifying current guidance
+ok 25 - fresh generation ids prevent stale prior payloads from verifying current guidance
+  ---
+  duration_ms: 4.828432
+  type: 'test'
+  ...
+# Subtest: prompt inclusion requires actual message content rather than unrelated metadata
+ok 26 - prompt inclusion requires actual message content rather than unrelated metadata
+  ---
+  duration_ms: 5.150447
+  type: 'test'
+  ...
+# Subtest: multimodal text blocks are recognized without inspecting image URLs or auth data
+ok 27 - multimodal text blocks are recognized without inspecting image URLs or auth data
+  ---
+  duration_ms: 5.086571
+  type: 'test'
+  ...
+# Subtest: later payload-stage removal overrides an earlier inclusion observation
+ok 28 - later payload-stage removal overrides an earlier inclusion observation
+  ---
+  duration_ms: 5.280041
+  type: 'test'
+  ...
+# Subtest: dry-run payload events cannot change a live receipt
+ok 29 - dry-run payload events cannot change a live receipt
+  ---
+  duration_ms: 5.141223
+  type: 'test'
+  ...
+# Subtest: host completion and outgoing-prompt verification remain separate claims
+ok 30 - host completion and outgoing-prompt verification remain separate claims
+  ---
+  duration_ms: 6.231303
+  type: 'test'
+  ...
+# Subtest: duplicate received/rendered/ended events do not duplicate learning or notifications
+ok 31 - duplicate received/rendered/ended events do not duplicate learning or notifications
+  ---
+  duration_ms: 7.275743
+  type: 'test'
+  ...
+# Subtest: notification preferences do not disable receipt collection
+ok 32 - notification preferences do not disable receipt collection
+  ---
+  duration_ms: 7.595614
+  type: 'test'
+  ...
+# Subtest: same-text genuinely regenerated swipe with new metadata can still be verified
+ok 33 - same-text genuinely regenerated swipe with new metadata can still be verified
+  ---
+  duration_ms: 3.307785
+  type: 'test'
+  ...
+# Subtest: regeneration after deletion can be reported by the host as swipe rendering
+ok 34 - regeneration after deletion can be reported by the host as swipe rendering
+  ---
+  duration_ms: 3.258372
+  type: 'test'
+  ...
+# Subtest: an old completed receipt cannot be reused in another chat
+ok 35 - an old completed receipt cannot be reused in another chat
+  ---
+  duration_ms: 2.974835
+  type: 'test'
+  ...
+# Subtest: editing or switching away from a verified swipe invalidates its receipt
+ok 36 - editing or switching away from a verified swipe invalidates its receipt
+  ---
+  duration_ms: 3.39747
+  type: 'test'
+  ...
+# Subtest: a known failed partial message is excluded from future observation
+ok 37 - a known failed partial message is excluded from future observation
+  ---
+  duration_ms: 6.335068
+  type: 'test'
+  ...
+# Subtest: an aborted swipe is rejected even when the host emits no rendered event
+ok 38 - an aborted swipe is rejected even when the host emits no rendered event
+  ---
+  duration_ms: 5.183106
+  type: 'test'
+  ...
+# Subtest: an in-progress streamed message is not available to the Observer
+ok 39 - an in-progress streamed message is not available to the Observer
+  ---
+  duration_ms: 5.098469
+  type: 'test'
+  ...
+# Subtest: prompt installation failure cannot block normal generation or certify success
+ok 40 - prompt installation failure cannot block normal generation or certify success
+  ---
+  duration_ms: 4.450123
+  type: 'test'
+  ...
+# Subtest: failure of a new request does not erase a previous verified learning outcome
+ok 41 - failure of a new request does not erase a previous verified learning outcome
+  ---
+  duration_ms: 10.068033
+  type: 'test'
+  ...
+# Subtest: repeated initialization does not duplicate listeners
+ok 42 - repeated initialization does not duplicate listeners
+  ---
+  duration_ms: 3.541266
+  type: 'test'
+  ...
+# Subtest: disable lifecycle clears prompts, listeners, timers and bounded caches
+ok 43 - disable lifecycle clears prompts, listeners, timers and bounded caches
+  ---
+  duration_ms: 3.24402
+  type: 'test'
+  ...
+# Subtest: disable then enable is idempotent and can prepare a fresh generation
+ok 44 - disable then enable is idempotent and can prepare a fresh generation
+  ---
+  duration_ms: 2.951389
+  type: 'test'
+  ...
+# Subtest: receipts retain selection data, not entire chat/context snapshots
+ok 45 - receipts retain selection data, not entire chat/context snapshots
+  ---
+  duration_ms: 2.752059
+  type: 'test'
+  ...
+# Subtest: low-level response analysis does not write hidden trackers into story messages
+ok 46 - low-level response analysis does not write hidden trackers into story messages
+  ---
+  duration_ms: 5.013131
+  type: 'test'
+  ...
+# Subtest: stopping a subsequent quiet request cannot revoke an earlier completed reply
+ok 47 - stopping a subsequent quiet request cannot revoke an earlier completed reply
+  ---
+  duration_ms: 4.881101
+  type: 'test'
+  ...
+# Subtest: unsupported generation start retires a still-pending run instead of borrowing its receipt
+ok 48 - unsupported generation start retires a still-pending run instead of borrowing its receipt
+  ---
+  duration_ms: 4.226977
+  type: 'test'
+  ...
+# Subtest: 1.7.1 manifest loads the lifecycle entry point and local-only engine
+ok 49 - 1.7.1 manifest loads the lifecycle entry point and local-only engine
+  ---
+  duration_ms: 3.885374
+  type: 'test'
+  ...
+# Subtest: existing keyword bank, weights, operating mode and role survive migration
+ok 50 - existing keyword bank, weights, operating mode and role survive migration
+  ---
+  duration_ms: 8.028415
+  type: 'test'
+  ...
+# Subtest: Autopilot activates Auto features without rewriting their saved boolean flags
+ok 51 - Autopilot activates Auto features without rewriting their saved boolean flags
+  ---
+  duration_ms: 2.070394
+  type: 'test'
+  ...
+# Subtest: explicit Off overrides Autopilot for structureEnabled
+ok 52 - explicit Off overrides Autopilot for structureEnabled
+  ---
+  duration_ms: 3.53698
+  type: 'test'
+  ...
+# Subtest: explicit Off overrides Autopilot for feedbackObserverEnabled
+ok 53 - explicit Off overrides Autopilot for feedbackObserverEnabled
+  ---
+  duration_ms: 2.07391
+  type: 'test'
+  ...
+# Subtest: explicit Off overrides Autopilot for feedbackBalancerEnabled
+ok 54 - explicit Off overrides Autopilot for feedbackBalancerEnabled
+  ---
+  duration_ms: 1.835821
+  type: 'test'
+  ...
+# Subtest: explicit Off overrides Autopilot for endingWatchEnabled
+ok 55 - explicit Off overrides Autopilot for endingWatchEnabled
+  ---
+  duration_ms: 2.023123
+  type: 'test'
+  ...
+# Subtest: master disable blocks every feature and clears prompt injection
+ok 56 - master disable blocks every feature and clears prompt injection
+  ---
+  duration_ms: 3.046242
+  type: 'test'
+  ...
+# Subtest: master enable and Autopilot are independent controls
+ok 57 - master enable and Autopilot are independent controls
+  ---
+  duration_ms: 2.150034
+  type: 'test'
+  ...
+# Subtest: ordinary defaults display Custom rather than falsely advertising Balanced
+ok 58 - ordinary defaults display Custom rather than falsely advertising Balanced
+  ---
+  duration_ms: 2.376485
+  type: 'test'
+  ...
+# Subtest: explicit preset application changes tuning but preserves weights and keywords
+ok 59 - explicit preset application changes tuning but preserves weights and keywords
+  ---
+  duration_ms: 2.488252
+  type: 'test'
+  ...
+# Subtest: Autopilot alone does not silently overwrite saved tuning
+ok 60 - Autopilot alone does not silently overwrite saved tuning
+  ---
+  duration_ms: 3.065681
+  type: 'test'
+  ...
+# Subtest: invalid settings and impossible recurrence thresholds normalize together
+ok 61 - invalid settings and impossible recurrence thresholds normalize together
+  ---
+  duration_ms: 2.066808
+  type: 'test'
+  ...
+# Subtest: format-constrained traits are not balancing targets by default
+ok 62 - format-constrained traits are not balancing targets by default
+  ---
+  duration_ms: 2.607672
+  type: 'test'
+  ...
+# Subtest: legacy callbacks look up the current chat instead of registration-time context
+ok 63 - legacy callbacks look up the current chat instead of registration-time context
+  ---
+  duration_ms: 6.397993
+  type: 'test'
+  ...
+# Subtest: random integer helper rejects ranges that would loop forever
+ok 64 - random integer helper rejects ranges that would loop forever
+  ---
+  duration_ms: 2.04072
+  type: 'test'
+  ...
+# Subtest: disabling all categories prevents all legacy creative fields and fallback directions
+ok 65 - disabling all categories prevents all legacy creative fields and fallback directions
+  ---
+  duration_ms: 16.793849
+  type: 'test'
+  ...
+# Subtest: keyword-only operation remains available with every category disabled
+ok 66 - keyword-only operation remains available with every category disabled
+  ---
+  duration_ms: 2.538849
+  type: 'test'
+  ...
+# Subtest: disabled pacing and wildcard categories never leak independent instructions
+ok 67 - disabled pacing and wildcard categories never leak independent instructions
+  ---
+  duration_ms: 71.867385
+  type: 'test'
+  ...
+# Subtest: creative cue budget is honored at 1 layers
+ok 68 - creative cue budget is honored at 1 layers
+  ---
+  duration_ms: 7.016795
+  type: 'test'
+  ...
+# Subtest: creative cue budget is honored at 2 layers
+ok 69 - creative cue budget is honored at 2 layers
+  ---
+  duration_ms: 7.137966
+  type: 'test'
+  ...
+# Subtest: creative cue budget is honored at 3 layers
+ok 70 - creative cue budget is honored at 3 layers
+  ---
+  duration_ms: 7.882165
+  type: 'test'
+  ...
+# Subtest: creative cue budget is honored at 4 layers
+ok 71 - creative cue budget is honored at 4 layers
+  ---
+  duration_ms: 5.995498
+  type: 'test'
+  ...
+# Subtest: creative cue budget is honored at 5 layers
+ok 72 - creative cue budget is honored at 5 layers
+  ---
+  duration_ms: 7.183614
+  type: 'test'
+  ...
+# Subtest: minimum intensity selects one lens rather than a hidden extra set
+ok 73 - minimum intensity selects one lens rather than a hidden extra set
+  ---
+  duration_ms: 3.619244
+  type: 'test'
+  ...
+# Subtest: direction-only anti-repeat retains six prior directions
+ok 74 - direction-only anti-repeat retains six prior directions
+  ---
+  duration_ms: 23.302299
+  type: 'test'
+  ...
+# Subtest: keyword parsing is bounded, deduplicated and stripped of markup
+ok 75 - keyword parsing is bounded, deduplicated and stripped of markup
+  ---
+  duration_ms: 2.083163
+  type: 'test'
+  ...
+# Subtest: context gravity endpoints govern story anchors
+ok 76 - context gravity endpoints govern story anchors
+  ---
+  duration_ms: 10.224512
+  type: 'test'
+  ...
+# Subtest: preview includes the same eligible closing-watch section without consuming roll history
+ok 77 - preview includes the same eligible closing-watch section without consuming roll history
+  ---
+  duration_ms: 24.743106
+  type: 'test'
+  ...
+# Subtest: the compact packet stays bounded with all features and maximum lenses
+ok 78 - the compact packet stays bounded with all features and maximum lenses
+  ---
+  duration_ms: 30.072942
+  type: 'test'
+  ...
+# Subtest: pacing lenses refine, rather than contradict, selected architecture
+ok 79 - pacing lenses refine, rather than contradict, selected architecture
+  ---
+  duration_ms: 2.553571
+  type: 'test'
+  ...
+# Subtest: structural blueprint remains internally consistent for sustained
+ok 80 - structural blueprint remains internally consistent for sustained
+  ---
+  duration_ms: 10.81712
+  type: 'test'
+  ...
+# Subtest: structural blueprint remains internally consistent for domino
+ok 81 - structural blueprint remains internally consistent for domino
+  ---
+  duration_ms: 9.105875
+  type: 'test'
+  ...
+# Subtest: structural blueprint remains internally consistent for parallel
+ok 82 - structural blueprint remains internally consistent for parallel
+  ---
+  duration_ms: 10.958622
+  type: 'test'
+  ...
+# Subtest: structural blueprint remains internally consistent for echo
+ok 83 - structural blueprint remains internally consistent for echo
+  ---
+  duration_ms: 14.421802
+  type: 'test'
+  ...
+# Subtest: structural blueprint remains internally consistent for dialogue
+ok 84 - structural blueprint remains internally consistent for dialogue
+  ---
+  duration_ms: 11.130171
+  type: 'test'
+  ...
+# Subtest: structural blueprint remains internally consistent for pivot
+ok 85 - structural blueprint remains internally consistent for pivot
+  ---
+  duration_ms: 8.830932
+  type: 'test'
+  ...
+# Subtest: structural blueprint remains internally consistent for anticlimax
+ok 86 - structural blueprint remains internally consistent for anticlimax
+  ---
+  duration_ms: 4.794271
+  type: 'test'
+  ...
+# Subtest: structural blueprint remains internally consistent for mosaic
+ok 87 - structural blueprint remains internally consistent for mosaic
+  ---
+  duration_ms: 6.22917
+  type: 'test'
+  ...
+# Subtest: structural blueprint remains internally consistent for reverse
+ok 88 - structural blueprint remains internally consistent for reverse
+  ---
+  duration_ms: 4.985999
+  type: 'test'
+  ...
+# Subtest: structural blueprint remains internally consistent for time
+ok 89 - structural blueprint remains internally consistent for time
+  ---
+  duration_ms: 6.391072
+  type: 'test'
+  ...
+# Subtest: soft structural recency keeps 1 enabled families available without a forced cycle
+ok 90 - soft structural recency keeps 1 enabled families available without a forced cycle
+  ---
+  duration_ms: 35.093784
+  type: 'test'
+  ...
+# Subtest: soft structural recency keeps 2 enabled families available without a forced cycle
+ok 91 - soft structural recency keeps 2 enabled families available without a forced cycle
+  ---
+  duration_ms: 37.157779
+  type: 'test'
+  ...
+# Subtest: soft structural recency keeps 4 enabled families available without a forced cycle
+ok 92 - soft structural recency keeps 4 enabled families available without a forced cycle
+  ---
+  duration_ms: 45.405875
+  type: 'test'
+  ...
+# Subtest: soft structural recency keeps 5 enabled families available without a forced cycle
+ok 93 - soft structural recency keeps 5 enabled families available without a forced cycle
+  ---
+  duration_ms: 25.425822
+  type: 'test'
+  ...
+# Subtest: soft structural recency keeps 10 enabled families available without a forced cycle
+ok 94 - soft structural recency keeps 10 enabled families available without a forced cycle
+  ---
+  duration_ms: 20.498151
+  type: 'test'
+  ...
+# Subtest: zero influence and zero family weights both disable structure
+ok 95 - zero influence and zero family weights both disable structure
+  ---
+  duration_ms: 1.436971
+  type: 'test'
+  ...
+# Subtest: short and nested hidden blocks are removed without removing ordinary prose
+ok 96 - short and nested hidden blocks are removed without removing ordinary prose
+  ---
+  duration_ms: 1.909021
+  type: 'test'
+  ...
+# Subtest: unclosed recognized blocks and comments fail closed
+ok 97 - unclosed recognized blocks and comments fail closed
+  ---
+  duration_ms: 1.764815
+  type: 'test'
+  ...
+# Subtest: long trackers are stripped before context clipping
+ok 98 - long trackers are stripped before context clipping
+  ---
+  duration_ms: 3.914708
+  type: 'test'
+  ...
+# Subtest: custom hidden tag names can be supplied without regular-expression code
+ok 99 - custom hidden tag names can be supplied without regular-expression code
+  ---
+  duration_ms: 2.436575
+  type: 'test'
+  ...
+# Subtest: long-response word totals are complete rather than the phrase-sampling cap
+ok 100 - long-response word totals are complete rather than the phrase-sampling cap
+  ---
+  duration_ms: 8.687857
+  type: 'test'
+  ...
+# Subtest: long single paragraphs do not gain a synthetic paragraph boundary
+ok 101 - long single paragraphs do not gain a synthetic paragraph boundary
+  ---
+  duration_ms: 7.727864
+  type: 'test'
+  ...
+# Subtest: long response fingerprints preserve literal openings and endings
+ok 102 - long response fingerprints preserve literal openings and endings
+  ---
+  duration_ms: 11.618214
+  type: 'test'
+  ...
+# Subtest: large quotations are measured as quotations instead of discarded at 1500 characters
+ok 103 - large quotations are measured as quotations instead of discarded at 1500 characters
+  ---
+  duration_ms: 4.44057
+  type: 'test'
+  ...
+# Subtest: exact phrase samples never bridge a head-tail omission
+ok 104 - exact phrase samples never bridge a head-tail omission
+  ---
+  duration_ms: 12.334181
+  type: 'test'
+  ...
+# Subtest: three ASCII periods and Unicode ellipsis share the same punctuation category
+ok 105 - three ASCII periods and Unicode ellipsis share the same punctuation category
+  ---
+  duration_ms: 3.182496
+  type: 'test'
+  ...
+# Subtest: old same-length message edits invalidate the right record
+ok 106 - old same-length message edits invalidate the right record
+  ---
+  duration_ms: 2.263505
+  type: 'test'
+  ...
+# Subtest: unchanged records are not retokenized across repeated index reads
+ok 107 - unchanged records are not retokenized across repeated index reads
+  ---
+  duration_ms: 3.460736
+  type: 'test'
+  ...
+# Subtest: appending one message tokenizes that message, not all existing history
+ok 108 - appending one message tokenizes that message, not all existing history
+  ---
+  duration_ms: 3.845054
+  type: 'test'
+  ...
+# Subtest: recent context scope ignores old story vocabulary
+ok 109 - recent context scope ignores old story vocabulary
+  ---
+  duration_ms: 2.31997
+  type: 'test'
+  ...
+# Subtest: per-chat and per-message caches remain bounded across many chats
+ok 110 - per-chat and per-message caches remain bounded across many chats
+  ---
+  duration_ms: 17.65563
+  type: 'test'
+  ...
+# Subtest: chat identity separates characters using the same chat filename
+ok 111 - chat identity separates characters using the same chat filename
+  ---
+  duration_ms: 2.347831
+  type: 'test'
+  ...
+# Subtest: lexical detector abstains on Bonnie read her old texts.
+ok 112 - lexical detector abstains on Bonnie read her old texts.
+  ---
+  duration_ms: 2.808614
+  type: 'test'
+  ...
+# Subtest: lexical detector abstains on Bonnie never laughed.
+ok 113 - lexical detector abstains on Bonnie never laughed.
+  ---
+  duration_ms: 2.493591
+  type: 'test'
+  ...
+# Subtest: lexical detector abstains on Quietly she texted a friend.
+ok 114 - lexical detector abstains on Quietly she texted a friend.
+  ---
+  duration_ms: 1.736501
+  type: 'test'
+  ...
+# Subtest: lexical detector abstains on Bonnie considered her left hand.
+ok 115 - lexical detector abstains on Bonnie considered her left hand.
+  ---
+  duration_ms: 1.353236
+  type: 'test'
+  ...
+# Subtest: ambiguous actor clauses do not invent a specific performer
+ok 116 - ambiguous actor clauses do not invent a specific performer
+  ---
+  duration_ms: 1.699066
+  type: 'test'
+  ...
+# Subtest: known simple actors can produce a measured recurring action
+ok 117 - known simple actors can produce a measured recurring action
+  ---
+  duration_ms: 2.029293
+  type: 'test'
+  ...
+# Subtest: base-form direct requests suppress the matching actor-specific nudge
+ok 118 - base-form direct requests suppress the matching actor-specific nudge
+  ---
+  duration_ms: 7.085387
+  type: 'test'
+  ...
+# Subtest: a request at the start of a long user message is not missed
+ok 119 - a request at the start of a long user message is not missed
+  ---
+  duration_ms: 6.158122
+  type: 'test'
+  ...
+# Subtest: requesting Clara to message does not silence Bonnie-specific evidence
+ok 120 - requesting Clara to message does not silence Bonnie-specific evidence
+  ---
+  duration_ms: 3.861528
+  type: 'test'
+  ...
+# Subtest: requests to stop drinking do not exempt drinking from repetition checks
+ok 121 - requests to stop drinking do not exempt drinking from repetition checks
+  ---
+  duration_ms: 3.653425
+  type: 'test'
+  ...
+# Subtest: negation is local to its action rather than global across user instructions
+ok 122 - negation is local to its action rather than global across user instructions
+  ---
+  duration_ms: 3.079191
+  type: 'test'
+  ...
+# Subtest: story mentions are not automatically treated as user commands
+ok 123 - story mentions are not automatically treated as user commands
+  ---
+  duration_ms: 1.905927
+  type: 'test'
+  ...
+# Subtest: hypothetical and quoted actions do not become confident behavior corrections
+ok 124 - hypothetical and quoted actions do not become confident behavior corrections
+  ---
+  duration_ms: 2.081861
+  type: 'test'
+  ...
+# Subtest: recurrence must still occur in two of the latest three eligible replies
+ok 125 - recurrence must still occur in two of the latest three eligible replies
+  ---
+  duration_ms: 2.211717
+  type: 'test'
+  ...
+# Subtest: a zero sensitivity disables corrections
+ok 126 - a zero sensitivity disables corrections
+  ---
+  duration_ms: 1.795261
+  type: 'test'
+  ...
+# Subtest: generic fallback reports literal wording rather than inventing an activity
+ok 127 - generic fallback reports literal wording rather than inventing an activity
+  ---
+  duration_ms: 2.085377
+  type: 'test'
+  ...
+# Subtest: assistant sampling excludes user, system, tool, placeholder and clearly partial messages
+ok 128 - assistant sampling excludes user, system, tool, placeholder and clearly partial messages
+  ---
+  duration_ms: 1.701779
+  type: 'test'
+  ...
+# Subtest: regeneration after host deletion does not discard an additional historical reply
+ok 129 - regeneration after host deletion does not discard an additional historical reply
+  ---
+  duration_ms: 2.152818
+  type: 'test'
+  ...
+# Subtest: host delete-before-interceptor regeneration sequence retains the complete old window
+ok 130 - host delete-before-interceptor regeneration sequence retains the complete old window
+  ---
+  duration_ms: 2.424847
+  type: 'test'
+  ...
+# Subtest: a still-present swipe target is excluded consistently from all analysis
+ok 131 - a still-present swipe target is excluded consistently from all analysis
+  ---
+  duration_ms: 2.789596
+  type: 'test'
+  ...
+# Subtest: fingerprints count concrete text without judging subject matter
+ok 132 - fingerprints count concrete text without judging subject matter
+  ---
+  duration_ms: 2.201361
+  type: 'test'
+  ...
+# Subtest: report remains explicitly descriptive and labels bounded phrase analysis
+ok 133 - report remains explicitly descriptive and labels bounded phrase analysis
+  ---
+  duration_ms: 9.68034
+  type: 'test'
+  ...
+# Subtest: pending family selection alone never learns from a subsequent partial reply
+ok 134 - pending family selection alone never learns from a subsequent partial reply
+  ---
+  duration_ms: 1.580297
+  type: 'test'
+  ...
+# Subtest: verified normal completion records a matched learning outcome
+ok 135 - verified normal completion records a matched learning outcome
+  ---
+  duration_ms: 4.059947
+  type: 'test'
+  ...
+# Subtest: verified swipe completion replaces the old outcome instead of adding an unrelated one
+ok 136 - verified swipe completion replaces the old outcome instead of adding an unrelated one
+  ---
+  duration_ms: 3.594557
+  type: 'test'
+  ...
+# Subtest: editing an observed response invalidates its learned association
+ok 137 - editing an observed response invalidates its learned association
+  ---
+  duration_ms: 2.537757
+  type: 'test'
+  ...
+# Subtest: bounded learning metadata stores fingerprints, not story text, and restores safely
+ok 138 - bounded learning metadata stores fingerprints, not story text, and restores safely
+  ---
+  duration_ms: 4.163663
+  type: 'test'
+  ...
+# Subtest: model changes clear incompatible persisted associations
+ok 139 - model changes clear incompatible persisted associations
+  ---
+  duration_ms: 2.812921
+  type: 'test'
+  ...
+# Subtest: common family scaling is reported as no adjustment when no relative evidence exists
+ok 140 - common family scaling is reported as no adjustment when no relative evidence exists
+  ---
+  duration_ms: 2.479219
+  type: 'test'
+  ...
+# Subtest: the Balancer changes relative probabilities only for contrasting measured families
+ok 141 - the Balancer changes relative probabilities only for contrasting measured families
+  ---
+  duration_ms: 1.962302
+  type: 'test'
+  ...
+1..141
+# tests 141
+# suites 0
+# pass 141
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2389.569837

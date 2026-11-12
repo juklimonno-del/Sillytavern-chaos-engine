@@ -1,9 +1,9 @@
 name: Checks
-
 on:
   push:
   pull_request:
-
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -12,7 +12,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Check extension syntax
-        run: node --check index.js
-      - name: Run automated tests
-        run: node --test
+      - name: Check browser scripts
+        run: |
+          node --check index.js
+          node --input-type=module --check < entry.js
+      - name: Unit, host-lifecycle and real Chromium DOM tests
+        run: node --test tests/*.test.cjs
+      - name: Safe package applier tests
+        run: python3 -m unittest discover -s tests -p 'test_apply_release.py'

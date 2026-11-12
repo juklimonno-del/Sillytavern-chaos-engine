@@ -1,0 +1,28 @@
+{
+  "scope": "Synthetic Node-only measurement of 1.7.1, not a comparison to 1.7.0 or phone/Gemini latency.",
+  "node": "v22.16.0",
+  "messages": 120,
+  "rawCharacters": 240250,
+  "cold": {
+    "ms": 124.67123000000001,
+    "words": 118,
+    "chars": 881
+  },
+  "warm": {
+    "medianMs": 1.8309229999999843,
+    "maxMs": 5.341778000000005,
+    "minWords": 89,
+    "maxWords": 130
+  },
+  "append": {
+    "ms": 1.7061199999999985,
+    "words": 123,
+    "chars": 845
+  },
+  "counters": {
+    "coldNewRecords": 120,
+    "warmNewRecords": 0,
+    "warmNewTokenizations": 0,
+    "appendNewRecords": 1
+  }
+}
