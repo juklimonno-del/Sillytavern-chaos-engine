@@ -1052,6 +1052,166 @@ function sceFeedbackReportText(context, type='normal') {
     return lines.join('\n');
 }
 
+
+/* Repeated closing-beat watch.
+ * Objective scope: recognizable activity terms or repeated closing
+ * word sequences, in completed assistant replies. Every activity family
+ * is measured with the SAME rule. This is NOT semantic plot analysis.
+ */
+const SCE_ENDING_WATCH_DEFAULTS = Object.freeze({
+    endingWatchEnabled: false,
+    endingWatchStrength: 70,
+    endingWatchWindow: 8,
+    endingWatchMinimum: 3,
+});
+const SCE_ENDING_NAMES_IGNORE = new Set(('The A An And But Then She He Her His They Them Their I We ' +
+    'You It This That Those These Here There What Who When Why How Where After Before At In On ' +
+    'As From To With By For While Meanwhile Suddenly Later Finally Eventually').toLocaleLowerCase().split(' '));
+const SCE_ENDING_STOP = new Set(('a an the another and or but so then after before to of in on at for with ' +
+    'from by into out up down over under as is are was were be been being its it her his their ' +
+    'she he they them we i me my you your us our this that these those one someone something ' +
+    'again very just still finally eventually later already while meanwhile suddenly').split(' '));
+const SCE_ENDING_ACTIONS = [
+    {id:'messaging',label:'text or message activity',
+        patterns:[
+            /\b(?:text(?:s|ed|ing)?|messag(?:e|es|ed|ing)|dms?|dm(?:ed|ing)|sms)\b/giu,
+            /\b(?:send|sends|sent|sending|wrot(?:e|ing)|writ(?:e|es|ing)|typ(?:e|es|ed|ing)|fir(?:e|es|ed|ing))\b.{0,85}\b(?:text|message|dm|sms)\b/giu
+        ]},
+    {id:'calling',label:'calls or dialing',
+        patterns:[/\b(?:call(?:s|ed|ing)?|dial(?:s|ed|ing)?|voicemail)\b/giu]},
+    {id:'embracing',label:'hugging or embracing',
+        patterns:[/\b(?:hug(?:s|ged|ging)?|embrac(?:e|es|ed|ing)|cuddl(?:e|es|ed|ing))\b/giu]},
+    {id:'kissing',label:'kissing',patterns:[/\b(?:kiss(?:es|ed|ing)?|smooch(?:es|ed|ing)?)\b/giu]},
+    {id:'laughing',label:'laughing',patterns:[/\b(?:laugh(?:s|ed|ing)?|giggl(?:e|es|ed|ing)|chuckl(?:e|es|ed|ing))\b/giu]},
+    {id:'sighing',label:'sighing',patterns:[/\b(?:sigh(?:s|ed|ing)?|exhal(?:e|es|ed|ing))\b/giu]},
+    {id:'walking',label:'walking or leaving',patterns:[/\b(?:walk(?:s|ed|ing)?|leav(?:e|es|ing)|left|depart(?:s|ed|ing)?|exit(?:s|ed|ing)?)\b/giu]},
+    {id:'looking',label:'looking or glancing',patterns:[/\b(?:look(?:s|ed|ing)?|glanc(?:e|es|ed|ing)|star(?:e|es|ed|ing))\b/giu]},
+    {id:'asking',label:'asking questions',patterns:[/\b(?:ask(?:s|ed|ing)?|question(?:s|ed|ing)?|inquir(?:e|es|ed|ing))\b/giu]},
+    {id:'crying',label:'crying',patterns:[/\b(?:cry|cries|cried|crying|sob(?:s|bed|bing)?|weep(?:s|ing)?)\b/giu]},
+    {id:'drinking',label:'drinking',patterns:[/\b(?:drink(?:s|ing)?|drank|drunk|sip(?:s|ped|ping)?)\b/giu]},
+    {id:'eating',label:'eating',patterns:[/\b(?:eat(?:s|ing)?|ate|chew(?:s|ed|ing)?|munch(?:es|ed|ing)?)\b/giu]},
+    {id:'touching',label:'touching or grasping',patterns:[/\b(?:touch(?:es|ed|ing)?|grab(?:s|bed|bing)?|grasp(?:s|ed|ing)?)\b/giu]},
+    {id:'sleeping',label:'sleeping',patterns:[/\b(?:sleep(?:s|ing)?|slept|doz(?:e|es|ed|ing))\b/giu]},
+    {id:'smiling',label:'smiling or grinning',patterns:[/\b(?:smil(?:e|es|ed|ing)|grin(?:s|ned|ning)?)\b/giu]},
+    {id:'writing',label:'writing',patterns:[/\b(?:writ(?:e|es|ing)|wrote|scribbl(?:e|es|ed|ing)|jott?(?:ed|ing))\b/giu]},
+    {id:'waiting',label:'waiting',patterns:[/\b(?:wait(?:s|ed|ing)?|linger(?:s|ed|ing)?)\b/giu]},
+];
+function sceEndingTail(text) {
+    const plain=String(text||'').replace(/<[^>]*>/gu,' ').trim();
+    const paragraphs=plain.split(/\n\s*\n+/u).filter(Boolean);
+    // Look at the final two paragraphs, capped for predictable mobile cost.
+    return paragraphs.slice(-2).join(' ').slice(-520);
+}
+function sceEndingNamedActor(tail, at) {
+    const preceding=tail.slice(Math.max(0,at-120),at);
+    const names=[...preceding.matchAll(/\b[A-Z][a-z]{2,}(?:['’-][A-Za-z]+)?\b/gu)]
+        .map(match=>match[0].replace(/['’]s$/u,''))
+        .filter(name=>!SCE_ENDING_NAMES_IGNORE.has(name.toLocaleLowerCase()));
+    return names.length ? names[names.length-1] : null;
+}
+function sceEndingNormalizedToken(token) {
+    const t=String(token).toLocaleLowerCase();
+    if (/^(?:texts?|texted|texting|messages?|messaged|messaging|dms?|dming|dmed)$/u.test(t)) return 'message';
+    if (/^(?:sends?|sent|sending)$/u.test(t)) return 'send';
+    if (/^(?:writes?|wrote|writing|written)$/u.test(t)) return 'write';
+    if (/^(?:types?|typed|typing)$/u.test(t)) return 'type';
+    if (/^(?:looks?|looked|looking)$/u.test(t)) return 'look';
+    if (/^(?:laughs?|laughed|laughing)$/u.test(t)) return 'laugh';
+    if (/^(?:walks?|walked|walking)$/u.test(t)) return 'walk';
+    return t.replace(/(?:ing|ed|s)$/u, '') || t;
+}
+function sceEndingMotifs(text) {
+    const tail=sceEndingTail(text);
+    if(!tail) return [];
+    const motifs = new Map();
+    for(const action of SCE_ENDING_ACTIONS) {
+        let latest = null;
+        for(const re of action.patterns) {
+            for(const match of tail.matchAll(re)) {
+                if (latest == null || match.index > latest.index) latest = match;
+            }
+        }
+        if (!latest || latest.index < tail.length - 350) continue;
+        // Independently count activity recurrence with and without a named actor.
+        motifs.set('act:'+action.id,{key:'act:'+action.id,
+            label:action.label, specific:false, kind:'activity', group:action.id});
+        const actor=sceEndingNamedActor(tail,latest.index);
+        if(actor) {
+            const key='actor:'+actor.toLocaleLowerCase()+':'+action.id;
+            motifs.set(key,{key,label:actor+' + '+action.label,
+                specific:true,kind:'activity',group:action.id});
+        }
+    }
+    // Generic fallback: repeated exact 3-word sequences after simple, symmetric
+    // normalization. It can match actions outside our finite activity lexicon.
+    const normalized=sceFeedbackTextTokens(tail)
+        .map(sceEndingNormalizedToken).filter(t=>t.length>2 && !SCE_ENDING_STOP.has(t));
+    const ending=normalized.slice(-30);
+    for(let i=0;i+2<ending.length;i++) {
+        const phrase=ending.slice(i,i+3).join(' ');
+        const key='phrase:'+phrase;
+        motifs.set(key,{key,label:'repeated closing phrase ('+phrase+')',
+            specific:false,kind:'phrase',group:null});
+    }
+    return [...motifs.values()];
+}
+function sceEndingWatch(context,type='normal') {
+    const options=sceSettings(context);
+    if (!options.endingWatchEnabled || options.endingWatchStrength<=0) return null;
+    const samples=sceFeedbackReplySamples(context,options.endingWatchWindow,type);
+    if(samples.length<4) return null;
+    const detected=new Map();
+    const recent = samples.slice(-3);
+    for(const sample of samples) {
+        const motifs=sceEndingMotifs(sample.message.mes);
+        const unique=new Set();
+        for(const motif of motifs) {
+            if(unique.has(motif.key))continue;
+            unique.add(motif.key);
+            const item=detected.get(motif.key)||{...motif,count:0,recent:0};
+            item.count++;
+            if(recent.some(x=>x.index===sample.index))item.recent++;
+            detected.set(motif.key,item);
+        }
+    }
+    // Identical threshold for every actor, activity and generic phrase.
+    const eligible=[...detected.values()].filter(x=>
+        x.count>=options.endingWatchMinimum && x.recent>=2);
+    if(!eligible.length)return null;
+    // Avoid suppressing the immediate activity explicitly requested by the
+    // most recent user turn; user authorship outweighs the repetition nudge.
+    const chat=Array.isArray(context?.chat)?context.chat:[];
+    const lastUser=[...chat].reverse().find(x=>x?.is_user===true && typeof x.mes==='string');
+    const requested=lastUser?new Set(sceEndingMotifs(lastUser.mes).map(x=>x.key)):new Set();
+    const available=eligible.filter(x=>!requested.has(x.key) &&
+        !(x.kind==='activity' && requested.has('act:'+x.group)));
+    if(!available.length)return null;
+    // More frequent, more recent, actor-specific evidence outranks incidental
+    // common-token overlaps; no action family has an intrinsic preference.
+    available.sort((a,b)=>(b.count-a.count)||(b.recent-a.recent)||
+        (Number(b.specific)-Number(a.specific))||
+        ((a.kind==='phrase'?1:0)-(b.kind==='phrase'?1:0)));
+    const result=available[0];
+    return {...result,total:samples.length,strength:options.endingWatchStrength};
+}
+function sceFormatEndingWatch(watch) {
+    if(!watch)return '';
+    const strength=watch.strength>=75?'clear':'gentle';
+    return [
+        '[ENDING-PATTERN WATCH: MEASURED REPETITION, NOT A STORY DIRECTIVE]',
+        'Observed pattern in recent closing passages: '+watch.label+
+            ' ('+watch.count+' of '+watch.total+' completed assistant replies).',
+        strength==='clear'
+            ? 'For the next response, do not default to this same closing behavior. Let existing motives and circumstances decide what actually happens and how it ends.'
+            : 'For the next response, consider an ending that does not repeat this activity by habit, if the established scene allows it.',
+        'Do not simply shift the same repeated action to another character or force a dramatic opposite.',
+        'If the user explicitly requests or established continuity requires it, let the action occur normally.',
+        'This is a lexical recurrence estimate, not a judgment of meaning, quality, morality, or character behavior.',
+        'Do not mention the analysis in the fiction.',
+        '[/ENDING-PATTERN WATCH]',
+    ].join('\n');
+}
+
 function sceStructureUI(panel, config) {
     if (typeof document === 'undefined') return;
     const root = panel.querySelector('details > div');
