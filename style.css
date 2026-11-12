@@ -61,3 +61,19 @@
   white-space:pre-wrap; max-height:27em; overflow-y:auto;
 }
 #sce_settings .sce_feedback_group .sce_actions { flex-wrap:wrap; }
+
+
+/* v1.7: quiet default UI and honest after-reply receipts */
+#sce_settings .sce_main_group > summary { cursor:pointer; font-weight:700; }
+#sce_settings .sce_main_body { display:flex; flex-direction:column; gap:.6em; padding-top:.85em; }
+#sce_settings .sce_main_body textarea { width:100%; max-width:100%; box-sizing:border-box; }
+#sce_settings .sce_main_body input[type="range"] { width:100%; }
+#sce_settings .sce_main_body > small { opacity:.78; line-height:1.35; }
+#sce_settings .sce_main_body > select { width:100%; }
+#sce_settings .sce_advanced { display:block; }
+#sce_settings .sce_advanced[open] { display:flex; flex-direction:column; gap:.55em; }
+#sce_settings .sce_advanced > summary { cursor:pointer; font-weight:600; }
+#sce_settings .sce_run_receipt { border:1px solid var(--SmartThemeBorderColor); padding:.55em .65em; border-radius:6px;
+  overflow-wrap:anywhere; font-size:.87em; opacity:.85; }
+#sce_settings .sce_run_receipt[data-state="completed"] { border-left:3px solid var(--SmartThemeQuoteColor, var(--SmartThemeBorderColor)); opacity:1; }
+#sce_settings .sce_run_receipt[data-state="error"] { border-left:3px solid var(--SmartThemeWarningColor, var(--SmartThemeBorderColor)); }
