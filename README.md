@@ -1,20 +1,24 @@
-# Story Chaos Engine 1.7.1
+# Story Chaos Engine 1.8.0 candidate
 
 Browser-side creative guidance for SillyTavern. One ordinary model request, one depth-zero injection, no additional inference service, analytics, or API key.
 
-**Version:** 1.7.1, based on audited upstream commit `1982b0744537f09e3ea0dd73e4c91b0dc81b9818` (v1.7.0). Repository publication and CI results are recorded in the release pull request. `VERIFICATION.md` distinguishes original archive evidence from repository integration checks.
+**Status:** unreleased 1.8.0 candidate, based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. This feature branch prepares the Structural Entropy expansion for review. Its pull request and GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.0 test results.
 
 ## What changed
 
-This corrective version keeps all eleven creative categories, ten structural families, custom keywords, keyword influence, individual weights, context controls, and the User/System injection-role choice. It fixes the second audit's control, lifecycle, sampling, recurrence, and testing defects. See `AUDIT-FIXES.md` for the issue-by-issue map and `VERIFICATION.md` for what was actually tested.
+Structural Entropy expands from ten to eighteen families. The eight additions have multiple coherent routes through their phases; attention profiles vary how much emphasis each part receives, and selected transition instructions now appear in the injected packet. Existing density, influence, grounding, anti-repeat, and family-weight controls handle the expansion.
+
+All eleven creative categories, custom keywords, keyword influence, individual weights, context controls, and the User/System injection-role choice remain available. This candidate focuses on structural variation. Targeted keyword effects and automatic opening-context handling are separate proposals, not features of this branch. `AUDIT-FIXES.md` documents the earlier 1.7.1 corrections retained here.
 
 The everyday panel has an **Engine enabled** master switch, **Autopilot**, your keyword bank, an explicit preset Apply button, and an optional short completion notice. Fine tuning remains in collapsed sections. No analysis text is appended to your story.
 
-## Install or update
+## Try the candidate or update after release
 
-For a Git-managed installation, use SillyTavern's Extension Manager to install or update from [juklimonno-del/Sillytavern-chaos-engine](https://github.com/juklimonno-del/Sillytavern-chaos-engine), then reload SillyTavern. The updater follows the repository branch; confirm that the installed manifest and panel both show **1.7.1**. Back up local modifications before updating.
+The normal updater follows the installed repository branch. An installation following `main` receives 1.8.0 only after this candidate is approved and merged. For deliberate pre-release testing, use a separate checkout of the feature branch or the validated manual update below. Back up local modifications first.
 
-### Optional manual update from the audited 1.7.0 files
+After release, use SillyTavern's Extension Manager to install or update from [juklimonno-del/Sillytavern-chaos-engine](https://github.com/juklimonno-del/Sillytavern-chaos-engine), reload SillyTavern, and confirm that both the installed manifest and panel show **1.8.0**.
+
+### Optional manual update from the recorded 1.7.1 files
 
 Stop SillyTavern first. Extract the archive into a separate folder, not on top of the installed extension. From the extracted folder, run:
 
@@ -22,17 +26,17 @@ Stop SillyTavern first. Extract the archive into a separate folder, not on top o
 python scripts/apply_release.py "/path/to/your/existing/Sillytavern-chaos-engine"
 ```
 
-This is a dry run. It verifies the existing files against the audited v1.7.0 Git blob hashes and validates the release's checksums. It does not merge changes from arbitrary newer versions. To apply the displayed plan:
+This is a dry run. It verifies the existing files against the recorded v1.7.1 Git blob hashes and validates the candidate's checksums. It does not merge changes from arbitrary newer versions. To apply the displayed plan:
 
 ```sh
 python scripts/apply_release.py "/path/to/your/existing/Sillytavern-chaos-engine" --apply
 ```
 
-The script makes a timestamped backup beside the target directory, atomically replaces the managed files, retires the five superseded mock-only test files, and prints a rollback command. It refuses to overwrite modified/newer code or tests, never follows managed-path symlinks, and does not touch `.git`, chat files, API credentials, or saved SillyTavern settings. It performs no Git commit or push. Python 3.9+ is required only for this optional installation helper, not by the extension.
+The script makes a timestamped backup beside the target directory, atomically replaces the managed files, and prints a rollback command. This candidate retires no existing tests. It can replace the prior `release-files.json` only when that file matches the recorded baseline, or leave it unchanged when it already matches the candidate. It refuses to overwrite modified/newer code, tests, or package metadata, never follows managed-path symlinks, and does not touch `.git`, chat files, API credentials, or saved SillyTavern settings. It performs no Git commit or push. Python 3.9+ is required only for this optional installation helper, not by the extension.
 
-The deployable runtime files are `manifest.json`, `entry.js`, `index.js`, and `style.css`; retain `LICENSE`. A new manual installation can place those in one third-party extension folder. Do not enable two copies. For a manual update from the exact audited v1.7.0 files, the applier preserves `.git` and unrelated files instead of replacing the whole directory. If it detects modified or newer files, reconcile those changes manually. Keep local changes backed up before using the host's updater again.
+The deployable runtime files are `manifest.json`, `entry.js`, `index.js`, and `style.css`; retain `LICENSE`. A new manual installation can place those in one third-party extension folder. Do not enable two copies. For a manual update from the exact recorded v1.7.1 files, the applier preserves `.git` and unrelated files instead of replacing the whole directory. If it detects modified or newer files, reconcile those changes manually. Keep local changes backed up before using the host's updater again.
 
-Restart/reload SillyTavern and check that the panel says **v1.7.1**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
+Restart/reload SillyTavern and check that the candidate panel says **v1.8.0**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
 
 ## Controls that mean what they say
 
@@ -43,6 +47,29 @@ Each feature has **Auto / On / Off**. Auto follows Autopilot or your saved indiv
 The preset label is derived from the current numerical settings. It displays **Custom/current settings** when they do not match a named preset. Applying Subtle, Balanced, or Wild never rewrites keyword text or individual weights.
 
 All creative directions use the same category-aware layer budget. Disabled pacing/wildcard categories cannot leak separate legacy hints. With every category disabled, optional custom-keyword-only operation remains possible. Turn off structure and other feature overrides too when you want a pure keyword packet.
+
+## Expanded Structural Entropy
+
+The original ten families remain: Sustained moment, Domino chain, Parallel threads, Delayed echo, Conversational drift, Directional pivot, Deliberate anti-climax, Mosaic of moments, Consequence first, and Elastic time. The additional families provide distinct arrangements:
+
+| Family | Arrangement |
+|---|---|
+| Interrupted task (`resume`) | Attend to a brief diversion and return to the same unfinished activity. |
+| Attempt and adjustment (`revision`) | Make an attempt, observe its result, and adjust the approach to the same goal. |
+| Narrowing choices (`funnel`) | Use an available constraint or provisional action to reach a concrete next step. |
+| Shift of scale (`zoom`) | Move between a detail and its immediate surroundings within one connected situation. |
+| Counterpoint (`counterpoint`) | Put two supportable aspects of the same situation beside one another and act on the difference. |
+| Handoff (`relay`) | Transfer an existing task or responsibility and follow its changed state. |
+| Accumulation (`accumulate`) | Combine small contributions into one practical effect. |
+| Evidence and response (`discovery`) | Check observable details, qualify an interpretation, and act on what is supported. |
+
+Routes inside the new families change phase order rather than merely substituting words. For example, an interruption can come early before work resumes, or after some progress before the next step continues. Beat density selects a supported complete route; it does not require one paragraph per phase. Attention profiles can emphasize the beginning, middle, or end, spread attention evenly, or vary it across the selected beats. The packet explicitly treats attention as relative emphasis, preserving established paragraph and narration rules.
+
+Only one structural family and route are sent for a turn. The packet includes its selected transition instruction, so transition variation reaches the model. Soft recency penalties discourage recent structures without excluding every recent family or imposing a repeating rotation. Previewing a packet does not consume its history.
+
+The eight new family weights start at Low for ordinary settings. Existing saved weights and feature Off overrides are preserved. If all ten original family weights were explicitly Off, missing new weights also initialize Off, so an upgrade cannot silently reactivate structural guidance. The new selectors live in the existing collapsed family-weight section; Autopilot requires no extra daily controls.
+
+Routes should use established participants, activities, and observable information. They remain optional when the scene lacks the required relationship, and do not authorize inventing a user choice or hidden character knowledge. The local selector is lexical; source and browser tests can establish varied instructions and correct controls, but improved prose quality requires comparison of actual model outputs.
 
 ## What the status indicator proves
 
@@ -91,9 +118,9 @@ python -m unittest discover -s tests -p 'test_apply_release.py'
 node scripts/benchmark.cjs
 ```
 
-The old fixtures have been consolidated into direct engine/lifecycle tests and a real-DOM browser suite. They are not left alongside the new implementation with incompatible assumptions. The applier backs up and retires only the five exact audited test files; locally modified tests cause a refusal. Coverage and deliberately changed expectations are documented in `TEST-MIGRATION.md`.
+The 1.7.1 release consolidated the older fixtures into direct engine/lifecycle tests and a real-DOM browser suite; that historical migration is documented in `TEST-MIGRATION.md`. This candidate retains those suites and adds `tests/structure180.test.cjs` plus expanded browser coverage for the new structural controls. The reversible-applier tests also cover upgrading known baseline package metadata while rejecting local/newer metadata.
 
-Browser tests execute the actual `index.js` and ESM lifecycle wrapper. Only relative resource URLs are mapped to data modules for offline loading. Host events and provider results are simulated. A real user-installed SillyTavern/Gemini streaming session remains a separate acceptance check; no such session was available for this package.
+Browser tests execute the actual `index.js` and ESM lifecycle wrapper. Only relative resource URLs are mapped to data modules for offline loading. Host events and provider results are simulated. Consult this candidate's pull request and current CI logs for execution results; the preserved `validation/*` files are from 1.7.1. A real user-installed SillyTavern/Gemini streaming session remains a separate acceptance check, and this candidate makes no claim of live provider validation.
 
 ## Privacy and license
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.8.0 — Unreleased candidate
+
+Structural Entropy expansion based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. Publication remains a separate step; the feature pull request and its checks record current validation.
+
+- Expand from ten to eighteen structural families: interrupted task, attempt and adjustment, narrowing choices, shift of scale, counterpoint, handoff, accumulation, and evidence and response.
+- Add multiple coherent phase routes within the new families and varied attention profiles across structural guidance, using the existing density, influence, grounding, and weight controls.
+- Include the selected transition in the actual injected packet and sampled preview; align structural signatures with delivered guidance rather than unused closing choices.
+- Keep soft recency, preview isolation, existing saved weights, and explicit Off overrides. Preserve an all-Off legacy family map when adding new families.
+- Add deterministic structural regression coverage and actual DOM checks with a simulated host. No live Gemini or prose-quality improvement is claimed.
+- Make release-applier version reporting follow package metadata and allow checksum-verified upgrades of the baseline package manifest, preserving backup, rollback, and rejection of newer/local modifications.
+
 ## 1.7.1 — November 12, 2026
 
 Corrective release covering the second audit. The release pull request records repository integration and CI results; the original archive's local verification is preserved in `VERIFICATION.md`.

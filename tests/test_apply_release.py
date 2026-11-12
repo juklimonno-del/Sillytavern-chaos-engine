@@ -1,4 +1,6 @@
 import importlib.util
+import io
+import json
 import pathlib
 import tempfile
 import unittest
@@ -77,6 +79,53 @@ class ApplyTests(unittest.TestCase):
         m.apply_plan(self.target,m.make_plan(self.source,self.target,self.meta))
         self.assertEqual((self.target/'release-files.json').read_bytes(),b'{}')
         self.assertEqual(m.make_plan(self.source,self.target,self.meta),{})
+    def test_known_baseline_metadata_upgrades_idempotently_and_restores(self):
+        old_metadata = b'{"version":"1.7.1","status":"repository-release"}\n'
+        new_metadata = b'{"version":"1.8.0","status":"unreleased-candidate"}\n'
+        self.meta['self_manifest'] = 'release-files.json'
+        self.meta['baseline_blobs']['release-files.json'] = m.git_blob(old_metadata)
+        (self.target/'release-files.json').write_bytes(old_metadata)
+        (self.source/'release-files.json').write_bytes(new_metadata)
+        plan = m.make_plan(self.source,self.target,self.meta)
+        self.assertEqual(plan['release-files.json'],new_metadata)
+        self.assertEqual((self.target/'release-files.json').read_bytes(),old_metadata)
+        backup = m.apply_plan(self.target,plan)
+        self.assertEqual((self.target/'release-files.json').read_bytes(),new_metadata)
+        self.assertEqual(m.make_plan(self.source,self.target,self.meta),{})
+        m.restore(self.target,backup,True)
+        self.assertEqual((self.target/'release-files.json').read_bytes(),old_metadata)
+        for rel,data in self.old.items():
+            self.assertEqual((self.target/rel).read_bytes(),data)
+    def test_divergent_baseline_metadata_is_rejected_without_changes(self):
+        old_metadata = b'{"version":"1.7.1"}\n'
+        modified_metadata = b'{"version":"1.7.1","local_changes":true}\n'
+        self.meta['self_manifest'] = 'release-files.json'
+        self.meta['baseline_blobs']['release-files.json'] = m.git_blob(old_metadata)
+        (self.target/'release-files.json').write_bytes(modified_metadata)
+        (self.source/'release-files.json').write_bytes(b'{"version":"1.8.0"}\n')
+        with self.assertRaisesRegex(ValueError,'Local/newer package metadata'):
+            m.make_plan(self.source,self.target,self.meta)
+        self.assertEqual((self.target/'release-files.json').read_bytes(),modified_metadata)
+        for rel,data in self.old.items():
+            self.assertEqual((self.target/rel).read_bytes(),data)
+    def test_unrecognized_existing_metadata_is_rejected(self):
+        self.meta['self_manifest'] = 'release-files.json'
+        (self.target/'release-files.json').write_bytes(b'{"version":"newer"}\n')
+        (self.source/'release-files.json').write_bytes(b'{"version":"1.8.0"}\n')
+        with self.assertRaisesRegex(ValueError,'Local/newer package metadata'):
+            m.make_plan(self.source,self.target,self.meta)
+    def test_cli_reports_candidate_and_baseline_from_metadata(self):
+        self.meta.update(version='1.8.0',baseline_version='1.7.1')
+        (self.source/'release-files.json').write_text(json.dumps(self.meta))
+        output = io.StringIO()
+        with patch.object(m,'__file__',str(self.source/'scripts'/'apply_release.py')), \
+                patch('sys.argv',['apply_release.py',str(self.target)]), \
+                patch('sys.stdout',output):
+            self.assertEqual(m.main(),0)
+        self.assertIn('Validated candidate 1.8.0 against unchanged baseline 1.7.1.',output.getvalue())
+        self.assertIn('Dry run only.',output.getvalue())
+        for rel,data in self.old.items():
+            self.assertEqual((self.target/rel).read_bytes(),data)
     def test_source_and_destination_cannot_be_same(self):
         with self.assertRaises(ValueError):m.make_plan(self.target,self.target,self.meta)
 

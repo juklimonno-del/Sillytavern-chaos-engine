@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply this tested candidate to an unchanged v1.7.0 folder, with backup/rollback.
+"""Apply this candidate to its recorded unchanged baseline, with backup/rollback.
 
 Default is a dry run. No Git commit, push, credentials, settings, or chat writes.
 Python 3.9+. Stop SillyTavern before using --apply. See README.md.
@@ -82,17 +82,22 @@ def make_plan(source: Path, target: Path, metadata: dict) -> dict[str, bytes | N
         relative = metadata["self_manifest"]
         data = safe_path(source, relative).read_bytes()
         dest = safe_path(target, relative)
-        if dest.exists() and (not dest.is_file() or dest.read_bytes() != data):
-            raise ValueError("Existing package metadata differs: " + relative)
-        if not dest.exists():
-            plan[relative] = data
+        if dest.exists():
+            if not dest.is_file():
+                raise ValueError("Existing package metadata is not a file: " + relative)
+            old = dest.read_bytes()
+            if old == data:
+                return plan
+            if relative not in baseline or not is_original(old, baseline[relative]):
+                raise ValueError("Local/newer package metadata detected; refusing to overwrite: " + relative)
+        plan[relative] = data
     return plan
 
 
 def atomic_write(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     mode = stat.S_IMODE(path.stat().st_mode) if path.is_file() else 0o644
-    fd, name = tempfile.mkstemp(prefix=".sce171-", dir=str(path.parent))
+    fd, name = tempfile.mkstemp(prefix=".sce-release-", dir=str(path.parent))
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
@@ -109,7 +114,7 @@ def apply_plan(target: Path, plan: dict[str, bytes | None]) -> Path | None:
     if not plan:
         return None
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup = target.parent / (target.name + ".before-1.7.1-" + stamp + "-" + uuid.uuid4().hex[:8])
+    backup = target.parent / (target.name + ".before-release-" + stamp + "-" + uuid.uuid4().hex[:8])
     backup.mkdir(mode=0o700)
     records: dict[str, dict] = {}
     # Back up everything before making any target change.
@@ -181,7 +186,9 @@ def main() -> int:
     source = Path(__file__).resolve().parents[1]
     metadata = json.loads((source / "release-files.json").read_text(encoding="utf-8"))
     plan = make_plan(source, target, metadata)
-    print("Validated candidate 1.7.1 against audited v1.7.0 files.")
+    version = metadata.get("version", "unspecified")
+    baseline_version = metadata.get("baseline_version", metadata.get("baseline_commit", "recorded baseline"))
+    print("Validated candidate", version, "against unchanged baseline", str(baseline_version) + ".")
     for relative, data in plan.items():
         print(("REPLACE/ADD " if data is not None else "RETIRE TEST ") + relative)
     if not args.apply:
