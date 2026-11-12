@@ -311,7 +311,8 @@ function sceHandleReplyRendered(messageId,type) {
     if (!Number.isInteger(id) || !sceFeedbackMessageEligible(message)) return;
     if (receipt.type==='normal' && id<receipt.startIndex) return;
     if (receipt.type!=='normal' && id<receipt.startIndex-1) return;
-    if (type && receipt.type!==type && !(receipt.type==='normal' && type==='')) return;
+    // SillyTavern may publish a swipe event for a regeneration. Match the
+    // pending injection and message position, not provider-specific type names.
     const actual=sceFeedbackCachedFingerprint(message);
     const repeating=sceOn(sceSettings(context),'endingWatchEnabled') ?
         sceEndingWatch(context,'normal') : null;
@@ -1690,6 +1691,19 @@ function sceAdvancedUI(panel, config) {
     });
 }
 
+let sceUiInitObserver = null;
+function sceWaitForSettingsPanel() {
+    if (sceUiInitObserver || typeof globalThis.MutationObserver !== 'function' ||
+        typeof document==='undefined' || !document.body) return;
+    sceUiInitObserver=new globalThis.MutationObserver(()=>{
+        if (!document.getElementById('extensions_settings')) return;
+        const observer=sceUiInitObserver;
+        sceUiInitObserver=null;
+        observer?.disconnect();
+        sceInit();
+    });
+    sceUiInitObserver.observe(document.body,{childList:true,subtree:true});
+}
 function sceInit() {
     const context = globalThis.SillyTavern?.getContext?.();
     if (!context) return;
@@ -1697,7 +1711,8 @@ function sceInit() {
     const settings = sceSettings(context);
     sceSyncTool(context);
     const root = typeof document !== 'undefined' && document.getElementById('extensions_settings');
-    if (!root || document.getElementById('sce_settings')) return;
+    if (!root) { sceWaitForSettingsPanel(); return; }
+    if (document.getElementById('sce_settings')) return;
     const panel = document.createElement('div');
     panel.id = 'sce_settings';
     panel.innerHTML = [
