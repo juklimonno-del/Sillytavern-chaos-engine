@@ -1,4 +1,4 @@
-// Story Chaos Engine v1.5.0: prompt injection by default, legacy function calling optional.
+// Story Chaos Engine v1.6.0: prompt injection by default, legacy function calling optional.
 // No external API calls, server dependencies, or model-generated random inputs.
 
 const MODES = [
@@ -200,7 +200,7 @@ function sceSettings(context = globalThis.SillyTavern?.getContext?.()) {
         if (settings[name] === undefined) settings[name] = defaultValue;
     }
     if (typeof settings.endingWatchEnabled !== 'boolean') settings.endingWatchEnabled = false;
-    settings.endingWatchStrength = sceBound(settings.endingWatchStrength, 70, 0, 100);
+    settings.endingWatchStrength = sceBound(settings.endingWatchStrength, 85, 0, 100);
     if (![4, 8, 16].includes(Number(settings.endingWatchWindow))) settings.endingWatchWindow = 8;
     else settings.endingWatchWindow = Number(settings.endingWatchWindow);
     if (![3, 4, 5].includes(Number(settings.endingWatchMinimum))) settings.endingWatchMinimum = 3;
@@ -1062,6 +1062,14 @@ function sceFeedbackReportText(context, type='normal') {
         'Balancer enabled: '+(sceSettings(context).feedbackBalancerEnabled?'yes':'no'),
         'Evidence-based family adjustments: '+(factors.ready?'available':'not enough matched evidence'),
     ];
+    const endingConfig = sceSettings(context);
+    const endingWatch = endingConfig.endingWatchEnabled ? sceEndingWatch(context, type) : null;
+    lines.push('', 'CLOSING-BEAT WATCH (lexical action and phrase recurrence)',
+        'Enabled: ' + (endingConfig.endingWatchEnabled ? 'yes' : 'no'),
+        'Recent repeated ending: ' + (endingWatch ?
+            endingWatch.label+' ('+endingWatch.count+'/'+endingWatch.total+')' :
+            'none over threshold / feature disabled'));
+
     if (factors.ready) for (const [id,x] of factors.factors) {
         lines.push('  '+SCE_STRUCTURE_FAMILIES[id].title+': x'+x.factor.toFixed(3)+
             ' ('+x.samples+' matched output(s))');
@@ -1081,7 +1089,7 @@ function sceFeedbackReportText(context, type='normal') {
  */
 const SCE_ENDING_WATCH_DEFAULTS = Object.freeze({
     endingWatchEnabled: false,
-    endingWatchStrength: 70,
+    endingWatchStrength: 85,
     endingWatchWindow: 8,
     endingWatchMinimum: 3,
 });
@@ -1336,6 +1344,28 @@ function sceFeedbackUI(panel, config) {
         '<option value="8">Last 8 responses</option>',
         '<option value="16">Last 16 responses</option>',
         '</select>',
+        '<details class="sce_group sce_ending_group">',
+        '<summary>🔁 Closing-Beat Watch <small>repeated actions and phrases</small></summary>',
+        '<label class="sce_line" for="sce_ending_enable"><span>Watch recurring closing actions</span>',
+        '<input type="checkbox" id="sce_ending_enable"></label>',
+        '<small>When repeated closing behavior is measured, add a short, action-neutral avoidance hint to the next normal prompt. No additional model calls.</small>',
+        '<div class="sce_line"><label for="sce_ending_strength">Ending-repeat avoidance strength</label>',
+        '<output id="sce_ending_strength_out"></output></div>',
+        '<input type="range" min="0" max="100" step="1" id="sce_ending_strength">',
+        '<label for="sce_ending_window">Previous assistant replies to check</label>',
+        '<select class="text_pole" id="sce_ending_window">',
+        '<option value="4">Last 4 responses</option>',
+        '<option value="8">Last 8 responses</option>',
+        '<option value="16">Last 16 responses</option>',
+        '</select>',
+        '<label for="sce_ending_minimum">Minimum repeated endings</label>',
+        '<select class="text_pole" id="sce_ending_minimum">',
+        '<option value="3">3 matching replies</option>',
+        '<option value="4">4 matching replies</option>',
+        '<option value="5">5 matching replies</option>',
+        '</select>',
+        '<small>Requires two matches among the most recent three replies. Recognizes only known action terms and literal recurring phrases. It cannot reliably understand equivalent plot beats.</small>',
+        '</details>',
         '<div class="sce_actions">',
         '<button class="menu_button" type="button" id="sce_feedback_analyze">📊 Analyze current replies</button>',
         '<button class="menu_button" type="button" id="sce_feedback_reset">Reset learned associations</button>',
@@ -1366,6 +1396,22 @@ function sceFeedbackUI(panel, config) {
     el('feedback_window').value = String(config.feedbackWindow);
     el('feedback_window').addEventListener('change', e =>
         save('feedbackWindow', Number(e.target.value)));
+    el('ending_enable').checked = !!config.endingWatchEnabled;
+    el('ending_enable').addEventListener('change', e =>
+        save('endingWatchEnabled', e.target.checked));
+    const endStrength = el('ending_strength'), endStrengthOut = el('ending_strength_out');
+    endStrength.value = config.endingWatchStrength;
+    endStrengthOut.textContent = endStrength.value + '%';
+    endStrength.addEventListener('input', e => {
+        endStrengthOut.textContent = e.target.value + '%';
+        save('endingWatchStrength', Number(e.target.value));
+    });
+    el('ending_window').value = String(config.endingWatchWindow);
+    el('ending_window').addEventListener('change', e =>
+        save('endingWatchWindow', Number(e.target.value)));
+    el('ending_minimum').value = String(config.endingWatchMinimum);
+    el('ending_minimum').addEventListener('change', e =>
+        save('endingWatchMinimum', Number(e.target.value)));
     el('feedback_analyze').addEventListener('click', () => {
         const report = el('feedback_report');
         report.textContent = sceFeedbackReportText(globalThis.SillyTavern?.getContext?.());
@@ -1478,7 +1524,7 @@ function sceInit() {
     panel.id = 'sce_settings';
     panel.innerHTML = [
         '<details style="border:1px solid var(--SmartThemeBorderColor);padding:.7em;margin:.5em 0;border-radius:6px">',
-        '<summary style="cursor:pointer;font-weight:bold">🎲 Story Chaos Engine · v1.5.0</summary>',
+        '<summary style="cursor:pointer;font-weight:bold">🎲 Story Chaos Engine · v1.6.0</summary>',
         '<div style="display:flex;flex-direction:column;gap:.6em;padding-top:.8em">',
         '<label for="sce_mode">Mode</label>',
         '<select id="sce_mode" class="text_pole">',
@@ -1511,7 +1557,7 @@ function sceInit() {
     sceAdvancedUI(panel, settings);
     sceStructureUI(panel, settings);
     sceFeedbackUI(panel, settings);
-    console.info('[Story Chaos Engine] v1.5.0 initialized:', settings.mode);
+    console.info('[Story Chaos Engine] v1.6.0 initialized:', settings.mode);
 }
 
 // The default mode does NOT register a function tool, even when function
