@@ -1,4 +1,4 @@
-// Story Chaos Engine v1.6.0: prompt injection by default, legacy function calling optional.
+// Story Chaos Engine v1.7.0: prompt injection by default, legacy function calling optional.
 // No external API calls, server dependencies, or model-generated random inputs.
 
 const MODES = [
@@ -93,9 +93,21 @@ function pickFresh(values, recent) {
     return pick(available.length ? available : values);
 }
 
-function getChatKey() {
-    const context = SillyTavern.getContext();
-    return String(context.chatId ?? context.chatMetadata?.chat_id ?? 'session');
+const SCE_FALLBACK_CHAT_IDS = new WeakMap();
+let sceFallbackChatCounter = 0;
+function getChatKey(context = globalThis.SillyTavern?.getContext?.()) {
+    const owner = context?.groupId != null ? 'group:' + context.groupId :
+        context?.characterId != null ? 'character:' + context.characterId : 'local';
+    const chatId = context?.chatId ?? context?.getCurrentChatId?.() ??
+        context?.chatMetadata?.chat_id;
+    if (chatId != null) return owner + '|' + String(chatId);
+    const chat = context?.chat;
+    if (chat && typeof chat === 'object') {
+        if (!SCE_FALLBACK_CHAT_IDS.has(chat))
+            SCE_FALLBACK_CHAT_IDS.set(chat, ++sceFallbackChatCounter);
+        return owner + '|temporary:' + SCE_FALLBACK_CHAT_IDS.get(chat);
+    }
+    return owner + '|unselected';
 }
 
 function generateCreativeRoll(preview = false) {
@@ -145,6 +157,7 @@ function register() {
     });
 
     console.info('[Story Chaos Engine] story_chaos_roll registered.');
+    return true;
 }
 
 
@@ -153,11 +166,23 @@ function register() {
 // This avoids the second API request that some OpenAI->Google proxies reject.
 const SCE_PROMPT_ID = 'story_chaos_engine_auto';
 const SCE_SETTINGS_KEY = 'storyChaosEngine';
+const SCE_AUTOPILOT_DEFAULTS = Object.freeze({
+    autopilotEnabled:false, notifyAfterReply:true, autopilotPreset:'balanced',
+});
 let sceToolRegistered = false;
 
 function sceSettings(context = globalThis.SillyTavern?.getContext?.()) {
     if (!context?.extensionSettings) return { mode: 'automatic', role: 'user' };
-    const settings = context.extensionSettings[SCE_SETTINGS_KEY] ??= {};
+    let settings = context.extensionSettings[SCE_SETTINGS_KEY] ??= {};
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings))
+        settings = context.extensionSettings[SCE_SETTINGS_KEY] = {};
+    for (const [name,value] of Object.entries(SCE_AUTOPILOT_DEFAULTS)) {
+        if (settings[name] === undefined) settings[name] = value;
+    }
+    if (typeof settings.autopilotEnabled !== 'boolean') settings.autopilotEnabled = false;
+    if (typeof settings.notifyAfterReply !== 'boolean') settings.notifyAfterReply = true;
+    if (!['subtle','balanced','wild'].includes(settings.autopilotPreset))
+        settings.autopilotPreset = 'balanced';
     if (!['automatic', 'tool', 'off'].includes(settings.mode)) settings.mode = 'automatic';
     if (!['user', 'system'].includes(settings.role)) settings.role = 'user';
     for (const [name, fallback] of Object.entries(SCE_ADV_DEFAULTS)) {
@@ -171,7 +196,7 @@ function sceSettings(context = globalThis.SillyTavern?.getContext?.()) {
     if (typeof settings.customKeywords !== 'string') settings.customKeywords = '';
     settings.customKeywords = settings.customKeywords.slice(0, 2400);
     if (typeof settings.antiRepeat !== 'boolean') settings.antiRepeat = true;
-    if (!settings.categoryWeights || typeof settings.categoryWeights !== 'object') settings.categoryWeights = {};
+    if (!settings.categoryWeights || typeof settings.categoryWeights !== 'object' || Array.isArray(settings.categoryWeights)) settings.categoryWeights = {};
     for (const [name, cat] of Object.entries(SCE_CATEGORIES)) {
         settings.categoryWeights[name] = sceBound(settings.categoryWeights[name], cat.weight, 0, 3);
     }
@@ -208,6 +233,9 @@ function sceSettings(context = globalThis.SillyTavern?.getContext?.()) {
     return settings;
 }
 
+function sceOn(settings,key) {
+    return !!(settings?.autopilotEnabled || settings?.[key]);
+}
 function sceClearPrompt(context) {
     context?.setExtensionPrompt?.(SCE_PROMPT_ID, '', 1, 0, false, 1);
 }
@@ -217,6 +245,9 @@ function sceFormatPrompt(roll) {
         '[STORY CHAOS ENGINE: EXTERNAL CREATIVE CUES, NOT CHARACTER SPEECH]',
         'Roll: ' + roll.roll + '/1000 | Randomness: ' + sceSettings().intensity + '/100',
     ];
+    if (roll.focus) lines.push('Optional focus: ' + roll.focus);
+    if (roll.rhythm) lines.push('Optional pacing: ' + roll.rhythm);
+    if (roll.wildcard) lines.push('Optional wildcard: ' + roll.wildcard);
     if (roll.anchor) lines.push('Existing story anchor: "' + roll.anchor + '"');
     if (roll.word_sparks?.length) lines.push('Optional word sparks: ' +
         roll.word_sparks.map(x=>'"'+x+'"').join(', '));
@@ -244,19 +275,19 @@ globalThis.storyChaosEngineInterceptor = async function(_chat, _contextSize, _ab
         return;
     }
     const result = sceLayeredRoll(context);
-    if (options.structureEnabled && options.feedbackObserverEnabled) {
+    if (sceOn(options, 'structureEnabled') && sceOn(options, 'feedbackObserverEnabled')) {
         sceFeedbackReconcile(context, type || 'normal');
     }
-    const structural = options.structureEnabled ? sceStructuralRoll(context, false, type || 'normal') : null;
+    const structural = sceOn(options, 'structureEnabled') ? sceStructuralRoll(context, false, type || 'normal') : null;
     // Ending-pattern detection is independent of Structural Entropy's
     // statistical family balancer. It requires no matched roll history.
-    const endingWatch = options.endingWatchEnabled ?
+    const endingWatch = sceOn(options, 'endingWatchEnabled') ?
         sceEndingWatch(context, type || 'normal') : null;
     // Depth 0 in a USER role keeps Gemini proxies from ending the prompt on
     // a model turn. Users can switch to a system-role injection if preferred.
     const role = options.role === 'system' ? 0 : 1;
     context.setExtensionPrompt(SCE_PROMPT_ID, sceFormatCombined(result, structural, endingWatch), 1, 0, false, role);
-    if (options.structureEnabled && options.feedbackObserverEnabled && structural) {
+    if (sceOn(options, 'structureEnabled') && sceOn(options, 'feedbackObserverEnabled') && structural) {
         sceFeedbackPending(context, structural.familyId, type || 'normal');
     }
     const label = typeof document !== 'undefined' && document.getElementById('sce_last_roll');
@@ -268,8 +299,7 @@ function sceSyncTool(context = globalThis.SillyTavern?.getContext?.()) {
     if (!context) return;
     const wanted = sceSettings(context).mode === 'tool';
     if (wanted && !sceToolRegistered) {
-        register();
-        sceToolRegistered = true;
+        sceToolRegistered = register() === true;
     } else if (!wanted && sceToolRegistered) {
         context.unregisterFunctionTool?.('story_chaos_roll');
         sceToolRegistered = false;
@@ -361,6 +391,14 @@ function sceWeighted(items) {
     for (const x of items) { n-=Math.max(0,x.weight); if (n<0) return x.value; }
     return items[items.length-1].value;
 }
+// Strip only recognized internal reasoning/tracker blocks, not story prose.
+function sceStoryText(value) {
+    let text = String(value ?? '');
+    text = text.replace(/<!--[\s\S]*?-->/gu,' ');
+    text = text.replace(/<(think|thinking|analysis|reasoning|cot|brainstorm|tracker|scene_tracker|state_tracker|hidden|ooc|metadata)\b[^>]*>[\s\S]*?<\/\1\s*>/giu,' ');
+    return text.replace(/<[^>]*>/gu,' ').replace(/https?:\/\/\S+/gu,' ')
+        .replace(/\{\{[^}]+\}\}/gu,' ');
+}
 function sceTokenize(text) {
     const tokens = globalThis.Intl?.Segmenter ?
         [...new Intl.Segmenter(undefined,{granularity:'word'}).segment(text)]
@@ -371,28 +409,29 @@ function sceTokenize(text) {
         x.length<=28 && !SCE_STOP.has(x) && !/^\d+$/u.test(x));
 }
 function sceWordIndex(context) {
-    const chat = Array.isArray(context?.chat)?context.chat:[];
+    const chat = Array.isArray(context?.chat) ? context.chat : [];
     const opts = sceSettings(context);
-    const key = getChatKey();
-    const last = chat[chat.length-1]?.mes||'';
-    const signature = opts.contextScope+'|'+chat.length+'|'+last.length+'|'+last.slice(-120);
-    const cache = sceWordIndexCache.get(key);
-    if (cache?.signature===signature) return cache.index;
-
-    const counts = new Map(), nearby = new Map(), recent = new Set();
-    let budget = 300000, analyzed = 0;
-    for (let i=chat.length-1;i>=0;i--) {
-        const age = chat.length-1-i;
-        if (opts.contextScope==='recent' && analyzed>=16) break;
+    const key = getChatKey(context);
+    const records = [];
+    let budget = 300000;
+    for (let i = chat.length - 1; i >= 0; i--) {
+        if (opts.contextScope === 'recent' && records.length >= 16) break;
         const msg = chat[i];
-        if (!msg || msg.is_system || typeof msg.mes!=='string' ||
+        if (!msg || msg.is_system || typeof msg.mes !== 'string' ||
             msg.extra?.tool_calls || msg.extra?.tool_result) continue;
-        const text = msg.mes.slice(0,4000)
-            .replace(/<[^>]*>|https?:\/\/\S+|\{\{[^}]+\}\}/g,' ');
-        if (text.length>budget) break;
-        budget-=text.length;
-        analyzed++;
-        const words=sceTokenize(text);
+        const raw = msg.mes.slice(0,4000);
+        if (raw.length > budget) break;
+        budget -= raw.length;
+        records.push({index:i,age:chat.length-1-i,raw,sig:sceFeedbackHash(raw)});
+    }
+    // Content hashes also detect older edits and same-length swipe replacements.
+    const signature = opts.contextScope + '|' + chat.length + '|' +
+        records.map(x=>x.index+':'+x.sig).join('|');
+    const cached = sceWordIndexCache.get(key);
+    if (cached?.signature===signature) return cached.index;
+    const counts = new Map(), nearby = new Map(), recent = new Set();
+    for (const {age,raw} of records) {
+        const words=sceTokenize(sceStoryText(raw));
         const weight=age<3?4:age<12?2.3:age<28?1.4:0.55;
         for (let j=0;j<words.length;j++) {
             const word=words[j];
@@ -407,11 +446,12 @@ function sceWordIndex(context) {
     }
     const options=[...counts].map(([value,count])=>
         ({value,weight:Math.min(16,1+Math.log2(1+count)*2)}));
-    const index={options,nearby,recent,analyzed};
+    const index={options,nearby,recent,analyzed:records.length};
     sceWordIndexCache.set(key,{signature,index});
     if (sceWordIndexCache.size>8) sceWordIndexCache.delete(sceWordIndexCache.keys().next().value);
     return index;
 }
+
 function scePersonalWords(value) {
     return [...new Set(String(value||'').split(/[\n,;]+/g)
         .map(x=>x.replace(/[^\p{L}\p{M}\p{N}\s'’-]/gu,' ')
@@ -422,7 +462,7 @@ function sceLayeredRoll(context = globalThis.SillyTavern?.getContext?.(),preview
     const opts=sceSettings(context);
     const base=JSON.parse(generateCreativeRoll(preview));
     const index=sceWordIndex(context);
-    const key=getChatKey();
+    const key=getChatKey(context);
     const old=sceRecentCueHistory.get(key)||[];
     const candidates=Object.entries(SCE_CATEGORIES)
         .filter(([name])=>opts.categoryWeights[name]>0)
@@ -579,7 +619,7 @@ function sceStructureSignals(context) {
     const recent = chat.slice(-12)
         .filter(m => m && !m.is_system && typeof m.mes === 'string' &&
             !m.extra?.tool_calls && !m.extra?.tool_result)
-        .map(m => m.mes.slice(0, 2500)).join('\n');
+        .map(m => sceStoryText(m.mes).slice(0, 2500)).join('\n');
     const count = (re) => Math.min(5, (recent.match(re) || []).length);
     return {
         dialogue: count(/["“”]|(?:\b(?:said|asked|replied|whispered|shouted|spoke|told)\b)/giu),
@@ -656,7 +696,7 @@ function sceStructureAttention(count, influence) {
 }
 function sceStructuralRoll(context = globalThis.SillyTavern?.getContext?.(), preview = false, type = 'normal') {
     const options = sceStructureSettings(context);
-    if (!options.structureEnabled || options.structureInfluence <= 0) return null;
+    if (!sceOn(options, 'structureEnabled') || options.structureInfluence <= 0) return null;
     const key = getChatKey();
     const grounding = options.structureGrounding / 100;
     const influence = options.structureInfluence / 100;
@@ -681,7 +721,7 @@ function sceStructuralRoll(context = globalThis.SillyTavern?.getContext?.(), pre
 
     // Optional empirical feedback only. No hardcoded preferred style or
     // unearned assumptions about what each structural family will produce.
-    if (!preview && options.feedbackObserverEnabled && options.feedbackBalancerEnabled) {
+    if (!preview && sceOn(options, 'feedbackObserverEnabled') && sceOn(options, 'feedbackBalancerEnabled')) {
         const report = sceFeedbackObserve(context, type);
         const observed = sceFeedbackFactors(context, report);
         for (const item of pool) {
@@ -827,7 +867,7 @@ function sceFeedbackTextTokens(text) {
 }
 function sceFeedbackFingerprint(messageOrText) {
     const raw = typeof messageOrText === 'string' ? messageOrText : messageOrText?.mes || '';
-    const text = String(raw).slice(0, 16000);
+    const text = sceStoryText(raw).slice(-16000);
     const tokens = sceFeedbackTextTokens(text);
     const blocks = text.trim().split(/\n\s*\n+/u).filter(x => x.trim());
     const sizes = blocks.map(x => sceFeedbackTextTokens(x).length);
@@ -1001,7 +1041,7 @@ function sceFeedbackFactors(context, report) {
     const settings=sceSettings(context);
     const factors=new Map();
     const diagnostics={ready:false,dominant:[],matched:0,factors};
-    if (!settings.feedbackObserverEnabled || !settings.feedbackBalancerEnabled ||
+    if (!sceOn(settings, 'feedbackObserverEnabled') || !sceOn(settings, 'feedbackBalancerEnabled') ||
         settings.feedbackStrength<=0 || !report || report.available<4 ||
         report.dominant.length===0) return diagnostics;
     const chat = Array.isArray(context?.chat) ? context.chat : [];
@@ -1058,14 +1098,14 @@ function sceFeedbackReportText(context, type='normal') {
                 x.label+' = '+x.value+' ('+x.count+'/'+x.total+')').join(' · ') : 'None / insufficient evidence'),
         '',
         'BALANCER (independent from measurements)',
-        'Observer enabled: '+(sceSettings(context).feedbackObserverEnabled?'yes':'no'),
-        'Balancer enabled: '+(sceSettings(context).feedbackBalancerEnabled?'yes':'no'),
+        'Observer enabled: '+(sceOn(sceSettings(context), 'feedbackObserverEnabled')?'yes':'no'),
+        'Balancer enabled: '+(sceOn(sceSettings(context), 'feedbackBalancerEnabled')?'yes':'no'),
         'Evidence-based family adjustments: '+(factors.ready?'available':'not enough matched evidence'),
     ];
     const endingConfig = sceSettings(context);
-    const endingWatch = endingConfig.endingWatchEnabled ? sceEndingWatch(context, type) : null;
+    const endingWatch = sceOn(endingConfig, 'endingWatchEnabled') ? sceEndingWatch(context, type) : null;
     lines.push('', 'CLOSING-BEAT WATCH (lexical action and phrase recurrence)',
-        'Enabled: ' + (endingConfig.endingWatchEnabled ? 'yes' : 'no'),
+        'Enabled: ' + (sceOn(endingConfig, 'endingWatchEnabled') ? 'yes' : 'no'),
         'Recent repeated ending: ' + (endingWatch ?
             endingWatch.label+' ('+endingWatch.count+'/'+endingWatch.total+')' :
             'none over threshold / feature disabled'));
@@ -1186,7 +1226,7 @@ function sceEndingMotifs(text) {
 }
 function sceEndingWatch(context,type='normal') {
     const options=sceSettings(context);
-    if (!options.endingWatchEnabled || options.endingWatchStrength<=0) return null;
+    if (!sceOn(options, 'endingWatchEnabled') || options.endingWatchStrength<=0) return null;
     const samples=sceFeedbackReplySamples(context,options.endingWatchWindow,type);
     if(samples.length<4) return null;
     const detected=new Map();
