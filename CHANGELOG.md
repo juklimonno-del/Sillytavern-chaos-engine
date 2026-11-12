@@ -1,8 +1,8 @@
 # Changelog
 
-## 1.8.0 — Unreleased candidate
+## 1.8.0 — November 12, 2026
 
-Structural Entropy expansion based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. Publication remains a separate step; the feature pull request and its checks record current validation.
+Structural Entropy expansion based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. [Release pull request #3](https://github.com/juklimonno-del/Sillytavern-chaos-engine/pull/3) and its checks record repository integration and current validation.
 
 - Expand from ten to eighteen structural families: interrupted task, attempt and adjustment, narrowing choices, shift of scale, counterpoint, handoff, accumulation, and evidence and response.
 - Add multiple coherent phase routes within the new families and varied attention profiles across structural guidance, using the existing density, influence, grounding, and weight controls.

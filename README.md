@@ -1,22 +1,22 @@
-# Story Chaos Engine 1.8.0 candidate
+# Story Chaos Engine 1.8.0
 
 Browser-side creative guidance for SillyTavern. One ordinary model request, one depth-zero injection, no additional inference service, analytics, or API key.
 
-**Status:** unreleased 1.8.0 candidate, based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. This feature branch prepares the Structural Entropy expansion for review. Its pull request and GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.0 test results.
+**Release:** 1.8.0 Structural Entropy expansion, based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. [Release pull request #3](https://github.com/juklimonno-del/Sillytavern-chaos-engine/pull/3) and its GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.0 test results.
 
 ## What changed
 
 Structural Entropy expands from ten to eighteen families. The eight additions have multiple coherent routes through their phases; attention profiles vary how much emphasis each part receives, and selected transition instructions now appear in the injected packet. Existing density, influence, grounding, anti-repeat, and family-weight controls handle the expansion.
 
-All eleven creative categories, custom keywords, keyword influence, individual weights, context controls, and the User/System injection-role choice remain available. This candidate focuses on structural variation. Targeted keyword effects and automatic opening-context handling are separate proposals, not features of this branch. `AUDIT-FIXES.md` documents the earlier 1.7.1 corrections retained here.
+All eleven creative categories, custom keywords, keyword influence, individual weights, context controls, and the User/System injection-role choice remain available. This release focuses on structural variation. Targeted keyword effects and automatic opening-context handling remain separate proposals. `AUDIT-FIXES.md` documents the earlier 1.7.1 corrections retained here.
 
 The everyday panel has an **Engine enabled** master switch, **Autopilot**, your keyword bank, an explicit preset Apply button, and an optional short completion notice. Fine tuning remains in collapsed sections. No analysis text is appended to your story.
 
-## Try the candidate or update after release
+## Install or update
 
-The normal updater follows the installed repository branch. An installation following `main` receives 1.8.0 only after this candidate is approved and merged. For deliberate pre-release testing, use a separate checkout of the feature branch or the validated manual update below. Back up local modifications first.
+The normal updater follows the installed repository branch. Use `main` for published releases. Back up local modifications before updating.
 
-After release, use SillyTavern's Extension Manager to install or update from [juklimonno-del/Sillytavern-chaos-engine](https://github.com/juklimonno-del/Sillytavern-chaos-engine), reload SillyTavern, and confirm that both the installed manifest and panel show **1.8.0**.
+Use SillyTavern's Extension Manager to install or update from [juklimonno-del/Sillytavern-chaos-engine](https://github.com/juklimonno-del/Sillytavern-chaos-engine), reload SillyTavern, and confirm that both the installed manifest and panel show **1.8.0**.
 
 ### Optional manual update from the recorded 1.7.1 files
 
@@ -26,17 +26,17 @@ Stop SillyTavern first. Extract the archive into a separate folder, not on top o
 python scripts/apply_release.py "/path/to/your/existing/Sillytavern-chaos-engine"
 ```
 
-This is a dry run. It verifies the existing files against the recorded v1.7.1 Git blob hashes and validates the candidate's checksums. It does not merge changes from arbitrary newer versions. To apply the displayed plan:
+This is a dry run. It verifies the existing files against the recorded v1.7.1 Git blob hashes and validates the release package's checksums. It does not merge changes from arbitrary newer versions. To apply the displayed plan:
 
 ```sh
 python scripts/apply_release.py "/path/to/your/existing/Sillytavern-chaos-engine" --apply
 ```
 
-The script makes a timestamped backup beside the target directory, atomically replaces the managed files, and prints a rollback command. This candidate retires no existing tests. It can replace the prior `release-files.json` only when that file matches the recorded baseline, or leave it unchanged when it already matches the candidate. It refuses to overwrite modified/newer code, tests, or package metadata, never follows managed-path symlinks, and does not touch `.git`, chat files, API credentials, or saved SillyTavern settings. It performs no Git commit or push. Python 3.9+ is required only for this optional installation helper, not by the extension.
+The script makes a timestamped backup beside the target directory, atomically replaces the managed files, and prints a rollback command. This release retires no existing tests. It can replace the prior `release-files.json` only when that file matches the recorded baseline, or leave it unchanged when it already matches this release. It refuses to overwrite modified/newer code, tests, or package metadata, never follows managed-path symlinks, and does not touch `.git`, chat files, API credentials, or saved SillyTavern settings. It performs no Git commit or push. Python 3.9+ is required only for this optional installation helper, not by the extension.
 
 The deployable runtime files are `manifest.json`, `entry.js`, `index.js`, and `style.css`; retain `LICENSE`. A new manual installation can place those in one third-party extension folder. Do not enable two copies. For a manual update from the exact recorded v1.7.1 files, the applier preserves `.git` and unrelated files instead of replacing the whole directory. If it detects modified or newer files, reconcile those changes manually. Keep local changes backed up before using the host's updater again.
 
-Restart/reload SillyTavern and check that the candidate panel says **v1.8.0**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
+Restart/reload SillyTavern and check that the panel says **v1.8.0**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
 
 ## Controls that mean what they say
 
@@ -118,9 +118,9 @@ python -m unittest discover -s tests -p 'test_apply_release.py'
 node scripts/benchmark.cjs
 ```
 
-The 1.7.1 release consolidated the older fixtures into direct engine/lifecycle tests and a real-DOM browser suite; that historical migration is documented in `TEST-MIGRATION.md`. This candidate retains those suites and adds `tests/structure180.test.cjs` plus expanded browser coverage for the new structural controls. The reversible-applier tests also cover upgrading known baseline package metadata while rejecting local/newer metadata.
+The 1.7.1 release consolidated the older fixtures into direct engine/lifecycle tests and a real-DOM browser suite; that historical migration is documented in `TEST-MIGRATION.md`. This release retains those suites and adds `tests/structure180.test.cjs` plus expanded browser coverage for the new structural controls. The reversible-applier tests also cover upgrading known baseline package metadata while rejecting local/newer metadata.
 
-Browser tests execute the actual `index.js` and ESM lifecycle wrapper. Only relative resource URLs are mapped to data modules for offline loading. Host events and provider results are simulated. Consult this candidate's pull request and current CI logs for execution results; the preserved `validation/*` files are from 1.7.1. A real user-installed SillyTavern/Gemini streaming session remains a separate acceptance check, and this candidate makes no claim of live provider validation.
+Browser tests execute the actual `index.js` and ESM lifecycle wrapper. Only relative resource URLs are mapped to data modules for offline loading. Host events and provider results are simulated. Consult the release pull request and current CI logs for execution results; the preserved `validation/*` files are from 1.7.1. A real user-installed SillyTavern/Gemini streaming session remains a separate acceptance check, and this release makes no claim of live provider validation.
 
 ## Privacy and license
 

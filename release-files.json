@@ -1,6 +1,6 @@
 {
   "version": "1.8.0",
-  "status": "unreleased-candidate",
+  "status": "released",
   "baseline_commit": "ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9",
   "self_manifest": "release-files.json",
   "baseline_blobs": {
@@ -38,14 +38,14 @@
   "payload_sha256": {
     ".github/workflows/test.yml": "3b05292884060e426fb15adf7a08650dd121f246fb0db6d60f3ea4bd78706f4f",
     "AUDIT-FIXES.md": "2fb1fb6193482edc64cfa2480c4d2cdd1ac66ad7767ed939f6e3b47848cb68b3",
-    "CHANGELOG.md": "10f612448a17e008d3bfa223d74d89a11e87fb2006ab53ff9954ba0d857d2e76",
+    "CHANGELOG.md": "7d2ae98e6aca5f1c2d841f40f2554ee474cc4074b60cbaeceec6f51c66aa4e9c",
     "LICENSE": "a71334ecce3ad48085fa743a8ba13d458c30dc21879be057e90aad76c1b8b8dd",
-    "PUBLISHING.md": "a9723b2658a45246350cf12496ee9a7f0cb50156aef9116e766922e1eef6af56",
-    "README.md": "5bfb3ed98a16b251bc9e9bc7f9832c8f9f040f068de3fede17ee2ebc1b38e022",
+    "PUBLISHING.md": "3d391e3533e0ea5f4039f50dade87eeeea31806106ae59f63866cf66e08eaef5",
+    "README.md": "7ec54664b1574157c494a7707bf5d2168f108ca1aa5f2c24044c3ab59d397a68",
     "TEST-MIGRATION.md": "1f5c1b11409469089b588bd255011c45c70278b54ea1befd052fc0bac55aec43",
     "VERIFICATION.md": "fae350d5b61f871ae986a665443c014bca38b5a60f1f9e2d1f6061dbb6975b77",
     "entry.js": "869469234adf5b7f85c9d6db1b3a094ca6386901354a44a97a1eecc3a0f4d7d6",
-    "index.js": "b65b18be9726e685a401f0b3df30c28544ffc02893ed299d8a2e55f44d5dffd3",
+    "index.js": "05dc6305ecfa473583817a8fb1370a9935dea42af561d9118d6bef5aed025fce",
     "manifest.json": "35ece5183171e694a00b0d373cc2a36c22b44eea28cd2b35f6feebb3b6b63afd",
     "scripts/apply_release.py": "32973d04e8b28275af9a588eaee82ee0ee3c0e0605daf44d971afc0dbe970545",
     "scripts/benchmark.cjs": "43c462afdda609a00a21e7dc4567ef46568f2bd566849114a7d6092817c6dd8c",

@@ -1,4 +1,4 @@
-// Story Chaos Engine v1.8.0 candidate. Browser-only; no extra model calls or telemetry.
+// Story Chaos Engine v1.8.0. Browser-only; no extra model calls or telemetry.
 // Pure selection/analysis helpers are kept separate from the host lifecycle below.
 'use strict';
 const SCE_VERSION = '1.8.0';
