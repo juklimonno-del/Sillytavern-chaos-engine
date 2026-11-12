@@ -323,6 +323,7 @@ function sceReplyRendered(messageId,type) {
         });
     }
 }
+function sceChatChanged() { sceRenderReceipt(); }
 function sceGenerationStopped() {
     const context=globalThis.SillyTavern?.getContext?.();
     const receipt=sceRunReceipt(context);
@@ -335,14 +336,14 @@ function sceSubscribeEvents(context) {
         const old=sceSubscribeEvents.types;
         sceListeningSource.removeListener(old.CHARACTER_MESSAGE_RENDERED,sceReplyRendered);
         sceListeningSource.removeListener(old.GENERATION_STOPPED,sceGenerationStopped);
-        sceListeningSource.removeListener(old.CHAT_CHANGED,sceRenderReceipt);
+        sceListeningSource.removeListener(old.CHAT_CHANGED,sceChatChanged);
     }
     if (types.CHARACTER_MESSAGE_RENDERED)
         source.on(types.CHARACTER_MESSAGE_RENDERED,sceReplyRendered);
     if (types.GENERATION_STOPPED)
         source.on(types.GENERATION_STOPPED,sceGenerationStopped);
     if (types.CHAT_CHANGED)
-        source.on(types.CHAT_CHANGED,sceRenderReceipt);
+        source.on(types.CHAT_CHANGED,sceChatChanged);
     sceListeningSource=source;
     sceSubscribeEvents.types=types;
 }
@@ -1583,9 +1584,19 @@ function sceFeedbackUI(panel, config) {
 function sceAdvancedUI(panel, config) {
     const root = panel.querySelector('details > div');
     if (!root) return;
-    const block = document.createElement('section');
-    block.className = 'sce_advanced';
+    const block = document.createElement('details');
+    block.className = 'sce_advanced sce_advanced_group';
     block.innerHTML = [
+        '<summary>⚙️ Advanced controls <small>optional fine tuning</small></summary>',
+        '<label for="sce_mode">Operating mode</label>',
+        '<select id="sce_mode" class="text_pole">',
+        '<option value="automatic">Automatic prompt injection</option>',
+        '<option value="tool">Legacy function calling</option>',
+        '<option value="off">Off</option></select>',
+        '<label for="sce_role">Injection role</label>',
+        '<select id="sce_role" class="text_pole">',
+        '<option value="user">User (Gemini proxy friendly)</option>',
+        '<option value="system">System</option></select>',
         '<div class="sce_line"><label for="sce_intensity">Creative randomness</label><output id="sce_intensity_out"></output></div>',
         '<input type="range" id="sce_intensity" min="0" max="100" step="1">',
         '<small>0 = one light suggestion; 100 = more independent layers, greater variety.</small>',
@@ -1606,13 +1617,6 @@ function sceAdvancedUI(panel, config) {
             '<option value="2">Normal</option><option value="3">High</option>' +
             '</select></label>'),
         '</details>',
-        '<details class="sce_group"><summary>Custom keywords</summary>',
-        '<label for="sce_keywords">Words or short phrases, comma or newline separated</label>',
-        '<textarea id="sce_keywords" class="text_pole" rows="3" maxlength="2400" placeholder="coffee, velvet, awkward pause"></textarea>',
-        '<div class="sce_line"><label for="sce_keywordboost">Custom keyword preference</label><output id="sce_keywordboost_out"></output></div>',
-        '<input type="range" id="sce_keywordboost" min="0" max="100" step="1">',
-        '<small>Increase to include your own words more often. The other keywords are extracted locally from the chat.</small>',
-        '</details>',
         '<label class="sce_line" for="sce_antirepeat"><span>Avoid recently used cues and anchors</span>',
         '<input type="checkbox" id="sce_antirepeat"></label>',
         '<button type="button" class="menu_button" id="sce_preview">🎲 Preview a roll</button>',
@@ -1629,7 +1633,6 @@ function sceAdvancedUI(panel, config) {
         ['intensity','intensity','%'],
         ['layers','maxLayers',''],
         ['gravity','contextGravity','%'],
-        ['keywordboost','keywordBoost','%'],
     ];
     for (const [id, property, suffix] of sliders) {
         const slider = el(id);
@@ -1651,8 +1654,6 @@ function sceAdvancedUI(panel, config) {
             globalThis.SillyTavern?.getContext?.()?.saveSettingsDebounced?.();
         });
     }
-    el('keywords').value = config.customKeywords;
-    el('keywords').addEventListener('input', e => store('customKeywords', e.target.value.slice(0,2400)));
     el('antirepeat').checked = config.antiRepeat;
     el('antirepeat').addEventListener('change', e => store('antiRepeat', e.target.checked));
     el('preview').addEventListener('click', () => {
@@ -1660,7 +1661,7 @@ function sceAdvancedUI(panel, config) {
         const current = globalThis.SillyTavern?.getContext?.();
         output.textContent = sceFormatCombined(
             sceLayeredRoll(current, true),
-            sceSettings(current).structureEnabled ? sceStructuralRoll(current, true) : null
+            sceOn(sceSettings(current),'structureEnabled') ? sceStructuralRoll(current, true) : null
         );
         output.hidden = false;
     });
@@ -1677,19 +1678,26 @@ function sceInit() {
     const panel = document.createElement('div');
     panel.id = 'sce_settings';
     panel.innerHTML = [
-        '<details style="border:1px solid var(--SmartThemeBorderColor);padding:.7em;margin:.5em 0;border-radius:6px">',
-        '<summary style="cursor:pointer;font-weight:bold">🎲 Story Chaos Engine · v1.6.0</summary>',
-        '<div style="display:flex;flex-direction:column;gap:.6em;padding-top:.8em">',
-        '<label for="sce_mode">Mode</label>',
-        '<select id="sce_mode" class="text_pole">',
-        '<option value="automatic">Automatic prompt injection (Gemini workaround)</option>',
-        '<option value="tool">Legacy function calling</option>',
-        '<option value="off">Off</option></select>',
-        '<label for="sce_role">Automatic injection role</label>',
-        '<select id="sce_role" class="text_pole">',
-        '<option value="user">User role (Gemini proxy-friendly)</option>',
-        '<option value="system">System role</option></select>',
-        '<small>Automatic mode rolls once per normal generation, without a tool call. Remove the old "call story_chaos_roll" instruction from your prompts.</small>',
+        '<details class="sce_main_group" open>',
+        '<summary>🎲 Story Chaos Engine · v1.7.0</summary>',
+        '<div class="sce_main_body">',
+        '<label class="sce_line" for="sce_autopilot"><span><strong>Autopilot</strong> · automatic variation and repetition correction</span>',
+        '<input type="checkbox" id="sce_autopilot"></label>',
+        '<small>Enable once, then keep writing. Your existing custom weights are preserved.</small>',
+        '<label for="sce_preset">Creative behavior</label>',
+        '<select id="sce_preset" class="text_pole">',
+        '<option value="subtle">Subtle</option>',
+        '<option value="balanced">Balanced</option>',
+        '<option value="wild">Wild</option></select>',
+        '<label for="sce_keywords">Your optional keywords</label>',
+        '<textarea id="sce_keywords" class="text_pole" rows="3" maxlength="2400" placeholder="coffee, velvet, awkward pause"></textarea>',
+        '<div class="sce_line"><label for="sce_keywordboost">Keyword influence</label>',
+        '<output id="sce_keywordboost_out"></output></div>',
+        '<input type="range" id="sce_keywordboost" min="0" max="100" step="1">',
+        '<label class="sce_line" for="sce_notify"><span>Brief completion notifications</span>',
+        '<input type="checkbox" id="sce_notify"></label>',
+        '<small>After a reply finishes, confirm the guidance was delivered. This does not claim the model obeyed it.</small>',
+        '<div class="sce_run_receipt" id="sce_run_receipt" role="status" aria-live="polite">No generated reply checked this session.</div>',
         '<small id="sce_last_roll">No rolls this session.</small>',
         '</div></details>',
     ].join('');
@@ -1698,6 +1706,59 @@ function sceInit() {
     const roleSelect = panel.querySelector('#sce_role');
     modeSelect.value = settings.mode;
     roleSelect.value = settings.role;
+    const autopilot=panel.querySelector('#sce_autopilot');
+    const preset=panel.querySelector('#sce_preset');
+    const keywords=panel.querySelector('#sce_keywords');
+    const keywordBoost=panel.querySelector('#sce_keywordboost');
+    const keywordOut=panel.querySelector('#sce_keywordboost_out');
+    const notify=panel.querySelector('#sce_notify');
+    autopilot.checked=settings.autopilotEnabled;
+    autopilot.addEventListener('change',e=>{
+        settings.autopilotEnabled=e.target.checked;
+        if (e.target.checked && settings.mode==='off') {
+            settings.mode='automatic';
+            modeSelect.value=settings.mode;
+        }
+        context.saveSettingsDebounced?.();
+    });
+    preset.value=settings.autopilotPreset;
+    preset.addEventListener('change',e=>{
+        settings.autopilotPreset=e.target.value;
+        const values={
+            subtle:{intensity:35,maxLayers:2,structureInfluence:55,beatDensity:40,contextGravity:80},
+            balanced:{intensity:65,maxLayers:3,structureInfluence:82,beatDensity:60,contextGravity:75},
+            wild:{intensity:90,maxLayers:4,structureInfluence:95,beatDensity:80,contextGravity:50},
+        }[e.target.value];
+        if (!values) return;
+        Object.assign(settings,values);
+        for(const [id,key] of [
+            ['intensity','intensity'],['layers','maxLayers'],['gravity','contextGravity'],
+            ['structure_influence','structureInfluence'],['structure_density','beatDensity'],
+        ]) {
+            const el=panel.querySelector('#sce_'+id);
+            if(el) el.value=String(settings[key]);
+            const out=panel.querySelector('#sce_'+id+'_out');
+            if(out) out.textContent=String(settings[key])+(id==='layers'?'':'%');
+        }
+        context.saveSettingsDebounced?.();
+    });
+    keywords.value=settings.customKeywords;
+    keywords.addEventListener('input',e=>{
+        settings.customKeywords=e.target.value.slice(0,2400);
+        context.saveSettingsDebounced?.();
+    });
+    keywordBoost.value=settings.keywordBoost;
+    keywordOut.textContent=settings.keywordBoost+'%';
+    keywordBoost.addEventListener('input',e=>{
+        settings.keywordBoost=Number(e.target.value);
+        keywordOut.textContent=e.target.value+'%';
+        context.saveSettingsDebounced?.();
+    });
+    notify.checked=settings.notifyAfterReply;
+    notify.addEventListener('change',e=>{
+        settings.notifyAfterReply=e.target.checked;
+        context.saveSettingsDebounced?.();
+    });
     modeSelect.addEventListener('change', () => {
         settings.mode = modeSelect.value;
         sceClearPrompt(context);
@@ -1711,7 +1772,8 @@ function sceInit() {
     sceAdvancedUI(panel, settings);
     sceStructureUI(panel, settings);
     sceFeedbackUI(panel, settings);
-    console.info('[Story Chaos Engine] v1.6.0 initialized:', settings.mode);
+    sceRenderReceipt(context);
+    console.info('[Story Chaos Engine] v1.7.0 initialized:', settings.mode);
 }
 
 // The default mode does NOT register a function tool, even when function
