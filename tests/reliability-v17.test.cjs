@@ -213,3 +213,19 @@ test('initialization places advanced mode fields before selecting them',()=>{
     assert.ok(source.indexOf('sceAdvancedUI(panel, settings);') <
         source.indexOf("const modeSelect = panel.querySelector('#sce_mode');"));
 });
+
+
+test('regeneration can finish on a swipe-named rendered event',async()=>{
+    const b=boot({},[reply('Old response here.')]);
+    await generate(b,'regenerate');
+    b.context.chat[0].mes='A newly generated response.';
+    b.eventSource.emit('rendered',0,'swipe');
+    assert.equal(b.tools.receipt(b.context).state,'completed');
+});
+test('corrupt persisted settings recover without breaking automatic generation',async()=>{
+    const b=boot();
+    b.context.extensionSettings.storyChaosEngine=['malformed'];
+    const response=await generate(b);
+    assert.match(response,/\[STORY CHAOS ENGINE:/);
+    assert.equal(b.tools.settings(b.context).mode,'automatic');
+});
