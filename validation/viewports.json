@@ -1,0 +1,14 @@
+[
+  {
+    "viewport": "desktop",
+    "width": 900,
+    "horizontalOverflow": false,
+    "browserTestsPassed": 20
+  },
+  {
+    "viewport": "mobile",
+    "width": 390,
+    "horizontalOverflow": false,
+    "browserTestsPassed": 20
+  }
+]

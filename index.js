@@ -1,6 +1,15 @@
-// Story Chaos Engine v1.7.0: prompt injection by default, legacy function calling optional.
-// No external API calls, server dependencies, or model-generated random inputs.
-
+// Story Chaos Engine v1.7.1. Browser-only; no extra model calls or telemetry.
+// Pure selection/analysis helpers are kept separate from the host lifecycle below.
+'use strict';
+const SCE_VERSION = '1.7.1';
+const SCE_SETTINGS_KEY = 'storyChaosEngine';
+const SCE_PROMPT_ID = 'story_chaos_engine_auto';
+const SCE_FEATURES = ['structureEnabled', 'feedbackObserverEnabled', 'feedbackBalancerEnabled', 'endingWatchEnabled'];
+const SCE_PRESETS = Object.freeze({
+    subtle: {intensity:35,maxLayers:2,structureInfluence:55,beatDensity:40,contextGravity:80},
+    balanced: {intensity:65,maxLayers:3,structureInfluence:82,beatDensity:60,contextGravity:75},
+    wild: {intensity:90,maxLayers:4,structureInfluence:95,beatDensity:80,contextGravity:50},
+});
 const MODES = [
     'An existing goal moves forward through an unexpected practical method.',
     'A character acts on a private priority nobody else is considering.',
@@ -21,26 +30,16 @@ const MODES = [
     'A ridiculous minor obsession steers otherwise ordinary behavior.',
     'Nothing dramatic interrupts the scene; the characters simply live in it.'
 ];
-
 const FOCUSES = [
-    'character-specific initiative',
-    'a neglected object or setting detail',
-    'unspoken social expectations',
-    'an existing promise or obligation',
-    'a secondary character’s independent agenda',
-    'a physical task with practical consequences',
-    'a different interpretation of something already said',
-    'an unexpected but believable bit of competence',
-    'an embarrassing but non-catastrophic mistake',
-    'a habit, grudge, fixation, or preference',
-    'a change in who has the conversational initiative',
-    'the environment carrying on regardless of the cast',
-    'ordinary logistics',
-    'a minor discovery that matters to one character',
-    'a previous action causing a delayed consequence',
+    'character-specific initiative','a neglected object or setting detail','unspoken social expectations',
+    'an existing promise or obligation','a secondary character’s independent agenda',
+    'a physical task with practical consequences','a different interpretation of something already said',
+    'an unexpected but believable bit of competence','an embarrassing but non-catastrophic mistake',
+    'a habit, grudge, fixation, or preference','a change in who has the conversational initiative',
+    'the environment carrying on regardless of the cast','ordinary logistics',
+    'a minor discovery that matters to one character','a previous action causing a delayed consequence',
     'an overlooked relationship between known facts'
 ];
-
 const RHYTHMS = [
     'Mostly dialogue, if the scene supports it.',
     'Mostly physical activity, with speech only when it matters.',
@@ -51,7 +50,6 @@ const RHYTHMS = [
     'One sustained event with plenty of concrete detail.',
     'A surprising change in pace partway through.'
 ];
-
 const WILDCARDS = [
     'An apparently irrelevant object becomes useful.',
     'Someone confidently misunderstands a small detail.',
@@ -66,1767 +64,1222 @@ const WILDCARDS = [
     'A confession is met with practical questions instead of drama.',
     'Someone’s kindness looks rude from the outside.'
 ];
-
-const recentModes = new Map();
-
-function randomInt(max) {
-    if (!Number.isSafeInteger(max) || max < 1) throw new Error('Invalid random range');
-    if (globalThis.crypto?.getRandomValues) {
-        // Rejection sampling avoids modulo bias.
-        const range = 0x100000000;
-        const limit = range - (range % max);
-        const buffer = new Uint32Array(1);
-        do {
-            globalThis.crypto.getRandomValues(buffer);
-        } while (buffer[0] >= limit);
-        return buffer[0] % max;
-    }
-    return Math.floor(Math.random() * max);
-}
-
-function pick(values) {
-    return values[randomInt(values.length)];
-}
-
-function pickFresh(values, recent) {
-    const available = values.filter(value => !recent.includes(value));
-    return pick(available.length ? available : values);
-}
-
-const SCE_FALLBACK_CHAT_IDS = new WeakMap();
-let sceFallbackChatCounter = 0;
-function getChatKey(context = globalThis.SillyTavern?.getContext?.()) {
-    const owner = context?.groupId != null ? 'group:' + context.groupId :
-        context?.characterId != null ? 'character:' + context.characterId : 'local';
-    const chatId = context?.chatId ?? context?.getCurrentChatId?.() ??
-        context?.chatMetadata?.chat_id;
-    if (chatId != null) return owner + '|' + String(chatId);
-    const chat = context?.chat;
-    if (chat && typeof chat === 'object') {
-        if (!SCE_FALLBACK_CHAT_IDS.has(chat))
-            SCE_FALLBACK_CHAT_IDS.set(chat, ++sceFallbackChatCounter);
-        return owner + '|temporary:' + SCE_FALLBACK_CHAT_IDS.get(chat);
-    }
-    return owner + '|unselected';
-}
-
-function generateCreativeRoll(preview = false) {
-    const key = getChatKey();
-    const recent = recentModes.get(key) ?? [];
-    const mode = pickFresh(MODES, recent);
-    if (!preview) recentModes.set(key, [mode, ...recent].slice(0, 6));
-
-    const result = {
-        roll: randomInt(1000) + 1,
-        creative_mode: mode,
-        focus: pick(FOCUSES),
-    };
-
-    // Vary the *number* of cues, so every turn does not acquire a fixed recipe.
-    if (randomInt(100) < 48) result.rhythm = pick(RHYTHMS);
-    if (randomInt(100) < 28) result.wildcard = pick(WILDCARDS);
-
-    result.guidance = 'Use these as optional creative directions, not literal events or mandatory beats. Preserve established characters, continuity, and the user character’s agency. Do not quote these fields or force a complication merely to satisfy the roll.';
-    return JSON.stringify(result);
-}
-
-function register() {
-    const context = globalThis.SillyTavern?.getContext?.();
-    if (!context?.registerFunctionTool) {
-        console.warn('[Story Chaos Engine] Function tool registration is not available.');
-        return;
-    }
-
-    context.registerFunctionTool({
-        name: 'story_chaos_roll',
-        displayName: 'Story Chaos Roll',
-        description: 'Before writing the next normal roleplay or fiction reply, call this tool once to receive externally randomized creative directions. The function takes NO arguments, so the author cannot select a convenient result. Apply the cues flexibly and preserve continuity. Never narrate the tool output.',
-        parameters: {
-            $schema: 'http://json-schema.org/draft-04/schema#',
-            type: 'object',
-            properties: {},
-            additionalProperties: false,
-        },
-        action: async () => {
-            const roll = sceLayeredRoll(context);
-            const structure = sceSettings(context).structureEnabled ? sceStructuralRoll(context) : null;
-            return JSON.stringify({...roll, structural: structure});
-        },
-        formatMessage: () => 'Rolling a new creative direction...',
-        stealth: false,
-    });
-
-    console.info('[Story Chaos Engine] story_chaos_roll registered.');
-    return true;
-}
-
-
-// --- Gemini-compatible automatic injection ---
-// SillyTavern executes this hook before assembling the next generation prompt.
-// This avoids the second API request that some OpenAI->Google proxies reject.
-const SCE_PROMPT_ID = 'story_chaos_engine_auto';
-const SCE_SETTINGS_KEY = 'storyChaosEngine';
-const SCE_AUTOPILOT_DEFAULTS = Object.freeze({
-    autopilotEnabled:false, notifyAfterReply:true, autopilotPreset:'balanced',
-});
-let sceToolRegistered = false;
-
-function sceSettings(context = globalThis.SillyTavern?.getContext?.()) {
-    if (!context?.extensionSettings) return { mode: 'automatic', role: 'user' };
-    let settings = context.extensionSettings[SCE_SETTINGS_KEY] ??= {};
-    if (!settings || typeof settings !== 'object' || Array.isArray(settings))
-        settings = context.extensionSettings[SCE_SETTINGS_KEY] = {};
-    for (const [name,value] of Object.entries(SCE_AUTOPILOT_DEFAULTS)) {
-        if (settings[name] === undefined) settings[name] = value;
-    }
-    if (typeof settings.autopilotEnabled !== 'boolean') settings.autopilotEnabled = false;
-    if (typeof settings.notifyAfterReply !== 'boolean') settings.notifyAfterReply = true;
-    if (!['subtle','balanced','wild'].includes(settings.autopilotPreset))
-        settings.autopilotPreset = 'balanced';
-    if (!['automatic', 'tool', 'off'].includes(settings.mode)) settings.mode = 'automatic';
-    if (!['user', 'system'].includes(settings.role)) settings.role = 'user';
-    for (const [name, fallback] of Object.entries(SCE_ADV_DEFAULTS)) {
-        if (settings[name] === undefined) settings[name] = fallback;
-    }
-    settings.intensity = sceBound(settings.intensity, 55, 0, 100);
-    settings.maxLayers = sceBound(settings.maxLayers, 3, 1, 5);
-    settings.contextGravity = sceBound(settings.contextGravity, 75, 0, 100);
-    settings.keywordBoost = sceBound(settings.keywordBoost, 30, 0, 100);
-    if (!['full','recent'].includes(settings.contextScope)) settings.contextScope = 'full';
-    if (typeof settings.customKeywords !== 'string') settings.customKeywords = '';
-    settings.customKeywords = settings.customKeywords.slice(0, 2400);
-    if (typeof settings.antiRepeat !== 'boolean') settings.antiRepeat = true;
-    if (!settings.categoryWeights || typeof settings.categoryWeights !== 'object' || Array.isArray(settings.categoryWeights)) settings.categoryWeights = {};
-    for (const [name, cat] of Object.entries(SCE_CATEGORIES)) {
-        settings.categoryWeights[name] = sceBound(settings.categoryWeights[name], cat.weight, 0, 3);
-    }
-    for (const [key, fallback] of Object.entries(SCE_STRUCTURE_DEFAULTS)) {
-        if (settings[key] === undefined) settings[key] = fallback;
-    }
-    if (typeof settings.structureEnabled !== 'boolean') settings.structureEnabled = false;
-    settings.structureInfluence = sceBound(settings.structureInfluence, 65, 0, 100);
-    settings.beatDensity = sceBound(settings.beatDensity, 55, 0, 100);
-    settings.structureGrounding = sceBound(settings.structureGrounding, 75, 0, 100);
-    if (typeof settings.structureAntiRepeat !== 'boolean') settings.structureAntiRepeat = true;
-    if (!settings.structureWeights || typeof settings.structureWeights !== 'object' ||
-        Array.isArray(settings.structureWeights)) settings.structureWeights = {};
-    for (const [id,family] of Object.entries(SCE_STRUCTURE_FAMILIES)) {
-        settings.structureWeights[id] = sceBound(settings.structureWeights[id], family.weight, 0, 3);
-    }
-    for (const [name, defaultValue] of Object.entries(SCE_FEEDBACK_DEFAULTS)) {
-        if (settings[name] === undefined) settings[name] = defaultValue;
-    }
-    if (typeof settings.feedbackObserverEnabled !== 'boolean') settings.feedbackObserverEnabled = false;
-    if (typeof settings.feedbackBalancerEnabled !== 'boolean') settings.feedbackBalancerEnabled = false;
-    settings.feedbackStrength = sceBound(settings.feedbackStrength, 65, 0, 100);
-    if (![4, 8, 16].includes(Number(settings.feedbackWindow))) settings.feedbackWindow = 8;
-    else settings.feedbackWindow = Number(settings.feedbackWindow);
-    for (const [name, defaultValue] of Object.entries(SCE_ENDING_WATCH_DEFAULTS)) {
-        if (settings[name] === undefined) settings[name] = defaultValue;
-    }
-    if (typeof settings.endingWatchEnabled !== 'boolean') settings.endingWatchEnabled = false;
-    settings.endingWatchStrength = sceBound(settings.endingWatchStrength, 85, 0, 100);
-    if (![4, 8, 16].includes(Number(settings.endingWatchWindow))) settings.endingWatchWindow = 8;
-    else settings.endingWatchWindow = Number(settings.endingWatchWindow);
-    if (![3, 4, 5].includes(Number(settings.endingWatchMinimum))) settings.endingWatchMinimum = 3;
-    else settings.endingWatchMinimum = Number(settings.endingWatchMinimum);
-    return settings;
-}
-
-function sceOn(settings,key) {
-    return !!(settings?.autopilotEnabled || settings?.[key]);
-}
-function sceClearPrompt(context) {
-    context?.setExtensionPrompt?.(SCE_PROMPT_ID, '', 1, 0, false, 1);
-}
-
-function sceFormatPrompt(roll) {
-    const lines = [
-        '[STORY CHAOS ENGINE: EXTERNAL CREATIVE CUES, NOT CHARACTER SPEECH]',
-        'Roll: ' + roll.roll + '/1000 | Randomness: ' + sceSettings().intensity + '/100',
-    ];
-    if (roll.focus) lines.push('Optional focus: ' + roll.focus);
-    if (roll.rhythm) lines.push('Optional pacing: ' + roll.rhythm);
-    if (roll.wildcard) lines.push('Optional wildcard: ' + roll.wildcard);
-    if (roll.anchor) lines.push('Existing story anchor: "' + roll.anchor + '"');
-    if (roll.word_sparks?.length) lines.push('Optional word sparks: ' +
-        roll.word_sparks.map(x=>'"'+x+'"').join(', '));
-    for (const layer of (roll.layers || []))
-        lines.push('Optional lens [' + layer.title + ']: ' + layer.instruction);
-    lines.push(
-        'These are separate creative possibilities, NOT a mandatory beat sequence; discard anything that does not fit.',
-        'Preserve existing characters, established continuity, output formatting, and the human user character’s choices.',
-        'Scene anchors come from prior story text. All word sparks are suggestions, not canon facts.',
-        'This is an extension-generated note, not dialogue from {{user}} or {{char}}. Do not quote it or describe the roll.',
-        '[/STORY CHAOS ENGINE]'
-    );
-    return lines.join('\n');
-}
-
-/* Generation receipts: confirmation is based on SillyTavern's rendered assistant
- * message event, not guesses about whether an LLM obeyed its creative cues. */
-const SCE_RUN_RECEIPTS = new Map();
-let sceListeningSource = null;
-function sceRunReceipt(context = globalThis.SillyTavern?.getContext?.()) {
-    return SCE_RUN_RECEIPTS.get(getChatKey(context)) || null;
-}
-function sceSetReceipt(context, receipt) {
-    const key = getChatKey(context);
-    if (receipt) SCE_RUN_RECEIPTS.set(key,receipt);
-    else SCE_RUN_RECEIPTS.delete(key);
-    if (SCE_RUN_RECEIPTS.size>12) SCE_RUN_RECEIPTS.delete(SCE_RUN_RECEIPTS.keys().next().value);
-    sceRenderReceipt(context);
-}
-function sceReceiptText(receipt) {
-    if (!receipt) return 'No generated reply checked this session.';
-    if (receipt.state==='prepared') return 'Preparing reply · guidance installed; awaiting completion.';
-    if (receipt.state==='stopped') return 'Generation stopped · no completed reply verified.';
-    if (receipt.state==='error') return 'Extension fallback · guidance unavailable for this turn.';
-    const details=[receipt.layers+' creative lens(es)'];
-    if (receipt.structure) details.push(receipt.structure);
-    if (receipt.closingHint) details.push('repetition nudge sent');
-    if (receipt.repeatLabel) details.push('recurring ending: '+receipt.repeatLabel);
-    return '✓ Reply completed after Chaos guidance was installed · '+details.join(' · ');
-}
-function sceRenderReceipt(context = globalThis.SillyTavern?.getContext?.()) {
-    if (typeof document==='undefined') return;
-    const el=document.getElementById?.('sce_run_receipt');
-    if (!el) return;
-    const receipt=sceRunReceipt(context);
-    el.textContent=sceReceiptText(receipt);
-    if (el.dataset) el.dataset.state=receipt?.state||'idle';
-}
-function sceReplyRendered(messageId,type) {
-    try { sceHandleReplyRendered(messageId,type); }
-    catch(error) { console.warn('[Story Chaos Engine] Receipt update failed.',error); }
-}
-function sceHandleReplyRendered(messageId,type) {
-    const context=globalThis.SillyTavern?.getContext?.();
-    if (!context || type==='first_message' || type==='impersonate') return;
-    const receipt=sceRunReceipt(context);
-    if (!receipt || receipt.state!=='prepared') return;
-    const id=Number(messageId);
-    const chat=Array.isArray(context.chat)?context.chat:[];
-    const message=chat[id];
-    if (!Number.isInteger(id) || !sceFeedbackMessageEligible(message)) return;
-    if (receipt.type==='normal' && id<receipt.startIndex) return;
-    if (receipt.type!=='normal' && id<receipt.startIndex-1) return;
-    // SillyTavern may publish a swipe event for a regeneration. Match the
-    // pending injection and message position, not provider-specific type names.
-    const actual=sceFeedbackCachedFingerprint(message);
-    const repeating=sceOn(sceSettings(context),'endingWatchEnabled') ?
-        sceEndingWatch(context,'normal') : null;
-    const finished={...receipt,state:'completed',messageIndex:id,
-        words:actual.wordCount,repeatLabel:repeating?.label||null};
-    sceSetReceipt(context,finished);
-    const options=sceSettings(context);
-    if (options.notifyAfterReply && typeof globalThis.toastr?.info==='function') {
-        const summary='🎲 Reply finished after Chaos guidance ('+actual.wordCount+' words)' +
-            (repeating?' · recurring ending detected':'');
-        globalThis.toastr.info(summary,'Story Chaos Engine',{
-            timeOut:2400,extendedTimeOut:1000,preventDuplicates:true,progressBar:false,
-        });
-    }
-}
-function sceChatChanged() { sceRenderReceipt(); }
-function sceGenerationStopped() {
-    const context=globalThis.SillyTavern?.getContext?.();
-    const receipt=sceRunReceipt(context);
-    if (receipt?.state==='prepared') sceSetReceipt(context,{...receipt,state:'stopped'});
-}
-function sceSubscribeEvents(context) {
-    const source=context?.eventSource, types=context?.eventTypes;
-    if (!source?.on || !types || source===sceListeningSource) return;
-    if (sceListeningSource?.removeListener && sceSubscribeEvents.types) {
-        const old=sceSubscribeEvents.types;
-        sceListeningSource.removeListener(old.CHARACTER_MESSAGE_RENDERED,sceReplyRendered);
-        sceListeningSource.removeListener(old.GENERATION_STOPPED,sceGenerationStopped);
-        sceListeningSource.removeListener(old.CHAT_CHANGED,sceChatChanged);
-    }
-    if (types.CHARACTER_MESSAGE_RENDERED)
-        source.on(types.CHARACTER_MESSAGE_RENDERED,sceReplyRendered);
-    if (types.GENERATION_STOPPED)
-        source.on(types.GENERATION_STOPPED,sceGenerationStopped);
-    if (types.CHAT_CHANGED)
-        source.on(types.CHAT_CHANGED,sceChatChanged);
-    sceListeningSource=source;
-    sceSubscribeEvents.types=types;
-}
-globalThis.storyChaosEngineInterceptor = async function(_chat,_contextSize,_abort,type) {
-    const context=globalThis.SillyTavern?.getContext?.();
-    if (!context?.setExtensionPrompt) return;
-    const kind=type || 'normal';
-    try {
-        const options=sceSettings(context);
-        if (options.mode!=='automatic' ||
-            ![undefined,null,'','normal','regenerate','swipe'].includes(type)) {
-            sceClearPrompt(context);
-            const prior=sceRunReceipt(context);
-            if (prior?.state==='prepared') sceSetReceipt(context,null);
-            return;
-        }
-        const result=sceLayeredRoll(context);
-        if (sceOn(options,'structureEnabled') && sceOn(options,'feedbackObserverEnabled'))
-            sceFeedbackReconcile(context,kind);
-        const structural=sceOn(options,'structureEnabled') ?
-            sceStructuralRoll(context,false,kind) : null;
-        const endingWatch=sceOn(options,'endingWatchEnabled') ?
-            sceEndingWatch(context,kind) : null;
-        const role=options.role==='system'?0:1;
-        const prompt=sceFormatCombined(result,structural,endingWatch);
-        context.setExtensionPrompt(SCE_PROMPT_ID,prompt,1,0,false,role);
-        sceSetReceipt(context,{
-            state:'prepared',type:kind,startIndex:context.chat?.length??0,
-            layers:result.layers.length,structure:structural?.family||null,
-            closingHint:!!endingWatch,
-        });
-        if (sceOn(options,'structureEnabled') && sceOn(options,'feedbackObserverEnabled') && structural)
-            sceFeedbackPending(context,structural.familyId,kind);
-        const label=typeof document!=='undefined' && document.getElementById('sce_last_roll');
-        if (label) label.textContent='Latest roll: '+result.roll+' · '+result.creative_mode;
-        console.debug('[Story Chaos Engine] Automatic depth-0 guidance injected.');
-    } catch(error) {
-        console.error('[Story Chaos Engine] Prompt preparation failed; clearing guidance.',error);
-        try { sceClearPrompt(context); } catch(clearError) { console.error(clearError); }
-        sceSetReceipt(context,{state:'error',layers:0,structure:null,closingHint:false});
-    }
-};
-
-function sceSyncTool(context = globalThis.SillyTavern?.getContext?.()) {
-    if (!context) return;
-    const wanted = sceSettings(context).mode === 'tool';
-    if (wanted && !sceToolRegistered) {
-        sceToolRegistered = register() === true;
-    } else if (!wanted && sceToolRegistered) {
-        context.unregisterFunctionTool?.('story_chaos_roll');
-        sceToolRegistered = false;
-    }
-}
-
-
-/* Layered randomness (v1.3): browser-side, no additional API round trip. */
 const SCE_CATEGORIES = {
-    direction: {name:'Story direction',weight:3,triggers:[],cues:[],words:['detour','priority','surprise','callback']},
-    character: {name:'Character impulses',weight:2,triggers:['want','need','habit','pride','refuse'],cues:[
+    direction:{name:'Story direction',weight:3,triggers:[],cues:MODES,words:['detour','priority','surprise','callback']},
+    character:{name:'Character impulses',weight:2,triggers:['want','need','habit','pride','refuse'],cues:[
         'A private priority quietly changes a character’s behavior.',
         'An ordinary habit suggests an unexpected next action.',
-        'Someone makes a confident but questionable personal choice.'
+        'Someone makes a confident but questionable personal choice.',
+        ...FOCUSES.map(x=>'Consider '+x+'.'),
     ],words:['impulse','fixation','habit','pride']},
-    dialogue: {name:'Dialogue & voice',weight:2,triggers:['ask','speak','talk','question','whisper'],cues:[
+    dialogue:{name:'Dialogue & voice',weight:2,triggers:['ask','speak','talk','question','whisper'],cues:[
         'Let a character speak in their own peculiar rhythm.',
         'A tiny misunderstanding redirects the exchange.',
         'Someone answers a serious question with a mundane concern.'
     ],words:['pause','tangent','interruption','misquote']},
-    social: {name:'Relationships & friction',weight:2,triggers:['friend','trust','jealous','kiss','promise'],cues:[
+    social:{name:'Relationships & friction',weight:2,triggers:['friend','trust','jealous','kiss','promise'],cues:[
         'A social expectation quietly changes what someone does.',
         'Two characters interpret the same gesture differently.',
         'Someone becomes surprisingly petty about a minor issue.'
     ],words:['favor','grudge','courtesy','obligation']},
-    setting: {name:'Setting & objects',weight:2,triggers:['room','door','table','couch','kitchen','window','rain'],cues:[
+    setting:{name:'Setting & objects',weight:2,triggers:['room','door','table','couch','kitchen','window','rain'],cues:[
         'An overlooked object already present becomes relevant.',
         'The environment creates a practical obstacle.',
         'An ordinary object is repurposed in an unexpected way.'
     ],words:['hinge','scratch','clutter','texture']},
-    consequences: {name:'Callbacks & consequences',weight:2,triggers:['remember','earlier','forgot','again','broken','owed'],cues:[
+    consequences:{name:'Callbacks & consequences',weight:2,triggers:['remember','earlier','forgot','again','broken','owed'],cues:[
         'A small previous action has a believable delayed consequence.',
         'An old obligation quietly changes the situation.',
         'Something earlier becomes unexpectedly useful.'
     ],words:['receipt','aftermath','reminder','reversal']},
-    humor: {name:'Humor & absurdity',weight:1,triggers:['laugh','funny','joke','ridiculous','embarrass'],cues:[
+    humor:{name:'Humor & absurdity',weight:1,triggers:['laugh','funny','joke','ridiculous','embarrass'],cues:[
         'An unremarkable problem is taken much too personally.',
         'An awkward reaction is funnier than a clever punchline.',
         'Someone argues passionately about a trivial detail.'
     ],words:['deadpan','pettiness','audacity','nonsense']},
-    physical: {name:'Physical & sensory',weight:1,triggers:['touch','warm','cold','noise','soft','smell'],cues:[
+    physical:{name:'Physical & sensory',weight:1,triggers:['touch','warm','cold','noise','soft','smell'],cues:[
         'A physical detail redirects attention for a moment.',
         'A concrete task briefly becomes the scene’s focus.',
         'An odd sensory discomfort shapes someone’s choices.'
     ],words:['friction','rattle','weight','static']},
-    curiosity: {name:'Curiosity & discovery',weight:1,triggers:['notice','strange','missing','wonder','clue'],cues:[
+    curiosity:{name:'Curiosity & discovery',weight:1,triggers:['notice','strange','missing','wonder','clue'],cues:[
         'Someone notices a small, overlooked discrepancy.',
         'A mundane assumption is quietly questioned.',
         'A passing curiosity leads into an unconventional tangent.'
     ],words:['trace','glimpse','oddity','rumor']},
-    pacing: {name:'Pacing & structure',weight:1,triggers:[],cues:[
+    pacing:{name:'Pacing & structure',weight:1,triggers:[],cues:[
         'Let one interaction unfold without artificial escalation.',
         'Vary the balance of action, dialogue, and description.',
-        'A brief time skip might be more interesting than another reaction.'
+        'A brief time skip might be more interesting than another reaction.',...RHYTHMS
     ],words:['pause','drift','cutaway','snapshot']},
-    wildcard: {name:'Wildcards & detours',weight:1,triggers:[],cues:[
+    wildcard:{name:'Wildcards & detours',weight:1,triggers:[],cues:[
         'A small distraction deserves attention for its own sake.',
         'Someone has an independent, unrelated errand.',
-        'The obvious dramatic reaction is declined.'
+        'The obvious dramatic reaction is declined.',...WILDCARDS
     ],words:['swerve','sidequest','coincidence','improvisation']}
 };
-const SCE_STOP = new Set(('a about after again all already also am an and any are as at back be because ' +
-    'been before being between both but by can cannot could did do does doing dont down each either ' +
-    'else even every for from get gets getting give go going got had has have having he her here him ' +
-    'his how i if im in into is it its just know like make many may me might more most much my no ' +
-    'not now of off on one only or other our out over own really said say she should since so some ' +
-    'still such than that the their them then there these they this those through to too under up ' +
-    'us very was we were what when where which while who why will with would yes you your yourself ' +
-    'character char user assistant system model prompt story scenes scene thoughts response message ' +
-    'messages words text instruction instructions').split(' '));
-const sceRecentCueHistory = new Map();
-const sceRecentAnchorHistory = new Map();
-const sceWordIndexCache = new Map();
-const SCE_ADV_DEFAULTS = {
-    intensity:55,maxLayers:3,contextGravity:75,contextScope:'full',
-    customKeywords:'',keywordBoost:30,antiRepeat:true
-};
-
-function sceBound(value,fallback,lo,hi) {
-    const number = Number(value);
-    return Number.isFinite(number) ? Math.max(lo,Math.min(hi,Math.round(number))) : fallback;
-}
-function sceChance(pct) { return randomInt(10000) < pct * 100; }
-function sceWeighted(items) {
-    if (!items.length) return null;
-    const total = items.reduce((sum,x)=>sum+Math.max(0,x.weight),0);
-    if (!total) return pick(items).value;
-    let n = randomInt(1000000)/1000000 * total;
-    for (const x of items) { n-=Math.max(0,x.weight); if (n<0) return x.value; }
-    return items[items.length-1].value;
-}
-// Strip only recognized internal reasoning/tracker blocks, not story prose.
-function sceStoryText(value) {
-    let text = String(value ?? '');
-    text = text.replace(/<!--[\s\S]*?-->/gu,' ');
-    text = text.replace(/<(think|thinking|analysis|reasoning|cot|brainstorm|tracker|scene_tracker|state_tracker|hidden|ooc|metadata)\b[^>]*>[\s\S]*?<\/\1\s*>/giu,' ');
-    return text.replace(/<[^>]*>/gu,' ').replace(/https?:\/\/\S+/gu,' ')
-        .replace(/\{\{[^}]+\}\}/gu,' ');
-}
-function sceTokenize(text) {
-    const tokens = globalThis.Intl?.Segmenter ?
-        [...new Intl.Segmenter(undefined,{granularity:'word'}).segment(text)]
-            .filter(x=>x.isWordLike).map(x=>x.segment) :
-        (text.match(/[\p{L}\p{M}]+/gu)||[]);
-    return tokens.map(x=>x.toLocaleLowerCase()).filter(x=>
-        x.length >= (/[\u3040-\u30ff\u3400-\u9fff]/u.test(x)?2:3) &&
-        x.length<=28 && !SCE_STOP.has(x) && !/^\d+$/u.test(x));
-}
-function sceWordIndex(context) {
-    const chat = Array.isArray(context?.chat) ? context.chat : [];
-    const opts = sceSettings(context);
-    const key = getChatKey(context);
-    const records = [];
-    let budget = 300000;
-    for (let i = chat.length - 1; i >= 0; i--) {
-        if (opts.contextScope === 'recent' && records.length >= 16) break;
-        const msg = chat[i];
-        if (!msg || msg.is_system || typeof msg.mes !== 'string' ||
-            msg.extra?.tool_calls || msg.extra?.tool_result) continue;
-        const raw = msg.mes.slice(0,4000);
-        if (raw.length > budget) break;
-        budget -= raw.length;
-        records.push({index:i,age:chat.length-1-i,raw,sig:sceFeedbackHash(raw)});
-    }
-    // Content hashes also detect older edits and same-length swipe replacements.
-    const signature = opts.contextScope + '|' + chat.length + '|' +
-        records.map(x=>x.index+':'+x.sig).join('|');
-    const cached = sceWordIndexCache.get(key);
-    if (cached?.signature===signature) return cached.index;
-    const counts = new Map(), nearby = new Map(), recent = new Set();
-    for (const {age,raw} of records) {
-        const words=sceTokenize(sceStoryText(raw));
-        const weight=age<3?4:age<12?2.3:age<28?1.4:0.55;
-        for (let j=0;j<words.length;j++) {
-            const word=words[j];
-            counts.set(word,(counts.get(word)||0)+weight);
-            if (age<12) recent.add(word);
-            const co=nearby.get(word)||new Map();
-            for (let k=Math.max(0,j-2);k<=Math.min(words.length-1,j+2);k++)
-                if (j!==k && words[j]!==words[k])
-                    co.set(words[k],(co.get(words[k])||0)+weight/(1+Math.abs(k-j)));
-            nearby.set(word,co);
-        }
-    }
-    // Familiar context remains eligible, but repetitive nouns don't monopolize
-    // every new random anchor. A small lexical novelty penalty is symmetric.
-    const recentAssist=records.filter(x=>chat[x.index]?.is_user===false).slice(0,8);
-    const documentFrequency=new Map();
-    for(const rec of recentAssist) {
-        for(const word of new Set(sceTokenize(sceStoryText(rec.raw))))
-            documentFrequency.set(word,(documentFrequency.get(word)||0)+1);
-    }
-    const options=[...counts].map(([value,count])=>{
-        const fraction=(documentFrequency.get(value)||0)/Math.max(1,recentAssist.length);
-        const weight=Math.min(16,1+Math.log2(1+count)*2)*(1-0.55*fraction);
-        return {value,weight};
-    });
-    const index={options,nearby,recent,analyzed:records.length};
-    sceWordIndexCache.set(key,{signature,index});
-    if (sceWordIndexCache.size>8) sceWordIndexCache.delete(sceWordIndexCache.keys().next().value);
-    return index;
-}
-
-function scePersonalWords(value) {
-    return [...new Set(String(value||'').split(/[\n,;]+/g)
-        .map(x=>x.replace(/[^\p{L}\p{M}\p{N}\s'’-]/gu,' ')
-            .replace(/\s+/g,' ').trim().slice(0,48))
-        .filter(x=>x && x.split(' ').length<=4))].slice(0,80);
-}
-function sceLayeredRoll(context = globalThis.SillyTavern?.getContext?.(),preview=false) {
-    const opts=sceSettings(context);
-    const base=JSON.parse(generateCreativeRoll(preview));
-    const index=sceWordIndex(context);
-    const key=getChatKey(context);
-    const old=sceRecentCueHistory.get(key)||[];
-    const candidates=Object.entries(SCE_CATEGORIES)
-        .filter(([name])=>opts.categoryWeights[name]>0)
-        .map(([name,cat])=>({value:name,
-            weight:opts.categoryWeights[name] *
-                (1+opts.contextGravity/100*0.7*Math.min(4,cat.triggers.filter(x=>index.recent.has(x)).length))
-        }));
-    const target=1+Array.from({length:opts.maxLayers-1},
-        ()=>sceChance(opts.intensity)).filter(Boolean).length;
-    const layers=[];
-    while(layers.length<target && candidates.length) {
-        const id=sceWeighted(candidates), def=SCE_CATEGORIES[id];
-        const pool=id==='direction'?[base.creative_mode]:def.cues;
-        const fresh=opts.antiRepeat?pool.filter(s=>!old.includes(id+':'+s)):pool;
-        const instruction=pick(fresh.length?fresh:pool);
-        layers.push({id,title:def.name,instruction});
-        if (!preview) {old.unshift(id+':'+instruction);old.length=Math.min(15,old.length);}
-        candidates.splice(candidates.findIndex(x=>x.value===id),1);
-    }
-    if (!preview) sceRecentCueHistory.set(key,old);
-
-    const prev=sceRecentAnchorHistory.get(key)||[];
-    const fresh=opts.antiRepeat?index.options.filter(x=>!prev.includes(x.value)):index.options;
-    const anchor=index.options.length&&sceChance(opts.contextGravity)?
-        sceWeighted(fresh.length?fresh:index.options):null;
-    if(anchor&&!preview) sceRecentAnchorHistory.set(key,[anchor,...prev].slice(0,5));
-    const custom=scePersonalWords(opts.customKeywords);
-    const free=layers.flatMap(x=>SCE_CATEGORIES[x.id].words);
-    const sparks=[];
-    const sparkCount=opts.intensity<35?1:opts.intensity<85?2:3;
-    for (let i=0;i<sparkCount;i++) {
-        let word=null;
-        if(custom.length&&sceChance(opts.keywordBoost)) word=pick(custom);
-        else if(index.options.length&&sceChance(opts.contextGravity)) {
-            const nearby=anchor&&index.nearby.get(anchor);
-            word=nearby?.size?sceWeighted([...nearby].map(([value,weight])=>({value,weight}))):
-                sceWeighted(index.options);
-        } else word=pick(free.length?free:SCE_CATEGORIES.direction.words);
-        if(word && word!==anchor && !sparks.includes(word)) sparks.push(word);
-    }
-    return {...base,anchor,word_sparks:sparks,layers,context_messages:index.analyzed};
-}
-
-
-
-/* Structural Entropy v1.4: independent narrative architecture.
- * The engine rolls abstract phases. Gemini creates the actual story beats.
- * No model call, API request, persistence, or external analysis is used.
- */
-const SCE_STRUCTURE_DEFAULTS = {
-    structureEnabled: false,
-    structureInfluence: 65,
-    beatDensity: 55,
-    structureGrounding: 75,
-    structureAntiRepeat: true,
-};
 const SCE_STRUCTURE_FAMILIES = {
-    sustained: {
-        title: 'Sustained moment', weight: 3, min: 1, max: 2,
-        affinity: {dialogue:1, action:1, observation:1},
-        phases: [['Sustain one ongoing interaction','Explore a practical task in detail','Stay with one character initiative'],
-                 ['Let a minor consequence register','Allow a small aside without changing the primary focus']],
-        transitions: ['Unbroken continuity','Brief natural aside','Subtle shift of attention'],
-    },
-    domino: {
-        title: 'Domino chain', weight: 2, min: 2, max: 5,
-        affinity: {action:2, consequence:2},
-        phases: [['Begin with an action already possible','Let a small decision create the first change'],
-                 ['Follow a direct consequence','Follow a character response','Let a practical aftereffect develop'],
-                 ['Carry the latest consequence forward','Leave circumstances visibly changed']],
-        transitions: ['Direct cause and effect','Physical follow-through','Action-to-reaction handoff'],
-    },
-    parallel: {
-        title: 'Parallel threads', weight: 2, min: 2, max: 5,
-        affinity: {dialogue:1, action:1, social:2},
-        phases: [['Follow an existing activity','Return to the first activity with a changed detail'],
-                 ['Attend to a second independent activity','Let someone pursue a separate priority'],
-                 ['Let two activities brush against one another, if natural','Keep activities separate without forcing convergence']],
-        transitions: ['Alternating perspectives without omniscient leakage','Intercut ongoing activities','Shift between independent concerns'],
-    },
-    echo: {
-        title: 'Delayed echo', weight: 2, min: 3, max: 5,
-        affinity: {consequence:2, observation:2},
-        phases: [['Notice a small established detail','Let an ordinary choice create an unnoticed implication'],
-                 ['Pursue an immediate interaction instead','Allow attention to drift elsewhere'],
-                 ['Return to an earlier detail in a changed context','Let an earlier action matter without a grand reveal']],
-        transitions: ['Temporary digression and later return','Loose association and callback','Delayed consequence'],
-    },
-    dialogue: {
-        title: 'Conversational drift', weight: 2, min: 2, max: 5,
-        affinity: {dialogue:3, social:1},
-        phases: [['Begin with a character-specific conversational impulse','Stay with the present exchange'],
-                 ['Let a detail suggest a tangential topic','Follow an unexpected association','Make room for an awkward conversational turn'],
-                 ['Leave the topic in motion','Return to the original concern only if someone wants to']],
-        transitions: ['Topic association','Speaker-led redirection','Natural conversational interruption'],
-    },
-    pivot: {
-        title: 'Directional pivot', weight: 2, min: 2, max: 5,
-        affinity: {action:2, observation:1},
-        phases: [['Establish one active priority','Develop the ongoing activity'],
-                 ['A believable new priority redirects attention','A character chooses a different immediate objective'],
-                 ['Follow through on the new activity','Explore consequences of the changed priority']],
-        transitions: ['Abrupt but motivated switch','A practical redirection','A character-led change of focus'],
-    },
-    anticlimax: {
-        title: 'Deliberate anti-climax', weight: 2, min: 2, max: 4,
-        affinity: {dialogue:1, social:1, observation:1},
-        phases: [['Allow an expectation to form naturally','Notice an apparent opportunity for drama'],
-                 ['Let the obvious reaction fail to happen','Someone chooses a mundane concern instead'],
-                 ['Continue with ordinary life','Give a trivial detail disproportionate attention']],
-        transitions: ['Expectation quietly deflated','A casual refusal to escalate','Ordinary action takes over'],
-    },
-    mosaic: {
-        title: 'Mosaic of moments', weight: 1, min: 2, max: 5,
-        affinity: {observation:2, social:1},
-        phases: [['Notice a distinctive small behavior','Focus on a mundane physical detail'],
-                 ['Follow a nearby independent activity','A minor social interaction occupies the foreground'],
-                 ['Let a separate observation develop','Return to an earlier detail, optionally']],
-        transitions: ['Loose associative cuts','A collection of adjacent moments','Brief focus changes'],
-    },
-    reverse: {
-        title: 'Consequence first', weight: 1, min: 2, max: 4,
-        affinity: {consequence:2, observation:1},
-        phases: [['Begin with the immediate result of an established or plausible action','Start from a present consequence'],
-                 ['Briefly reveal the cause through concrete context','Let preceding actions become clear without a long flashback'],
-                 ['Continue from the consequence','Show what the new circumstance makes possible']],
-        transitions: ['Short backward glance','A reveal through physical evidence','Present consequence followed by its origin'],
-    },
-    time: {
-        title: 'Elastic time', weight: 1, min: 2, max: 4,
-        affinity: {action:1, observation:2},
-        phases: [['Begin in one ongoing activity','Stay close to a small present moment'],
-                 ['Skip an uneventful stretch of time','Compress repeated ordinary actions'],
-                 ['Reveal change through a fresh detail','Return attention to what has shifted']],
-        transitions: ['Unannounced short time skip','Compressed routine then close detail','Brief ellipsis'],
-    },
+    sustained:{title:'Sustained moment',weight:3,min:1,max:2,affinity:{dialogue:1,action:1,observation:1},
+        phases:[['Sustain one ongoing interaction','Explore a practical task in detail','Stay with one character initiative'],
+            ['Let a minor consequence register','Allow a small aside without changing the primary focus']],
+        transitions:['Unbroken continuity','Brief natural aside','Subtle shift of attention']},
+    domino:{title:'Domino chain',weight:2,min:2,max:5,affinity:{action:2,consequence:2},
+        phases:[['Begin with an action already possible','Let a small decision create the first change'],
+            ['Follow a direct consequence','Follow a character response','Let a practical aftereffect develop'],
+            ['Carry the latest consequence forward','Leave circumstances visibly changed']],
+        transitions:['Direct cause and effect','Physical follow-through','Action-to-reaction handoff']},
+    parallel:{title:'Parallel threads',weight:2,min:2,max:5,affinity:{dialogue:1,action:1,social:2},
+        phases:[['Follow an existing activity','Return to the first activity with a changed detail'],
+            ['Attend to a second independent activity','Let someone pursue a separate priority'],
+            ['Let two activities brush against one another, if natural','Keep activities separate without forcing convergence']],
+        transitions:['Alternating perspectives without omniscient leakage','Intercut ongoing activities','Shift between independent concerns']},
+    echo:{title:'Delayed echo',weight:2,min:3,max:5,affinity:{consequence:2,observation:2},
+        phases:[['Notice a small established detail','Let an ordinary choice create an unnoticed implication'],
+            ['Pursue an immediate interaction instead','Allow attention to drift elsewhere'],
+            ['Return to an earlier detail in a changed context','Let an earlier action matter without a grand reveal']],
+        transitions:['Temporary digression and later return','Loose association and callback','Delayed consequence']},
+    dialogue:{title:'Conversational drift',weight:2,min:2,max:5,affinity:{dialogue:3,social:1},
+        phases:[['Begin with a character-specific conversational impulse','Stay with the present exchange'],
+            ['Let a detail suggest a tangential topic','Follow an unexpected association','Make room for an awkward conversational turn'],
+            ['Leave the topic in motion','Return to the original concern only if someone wants to']],
+        transitions:['Topic association','Speaker-led redirection','Natural conversational interruption']},
+    pivot:{title:'Directional pivot',weight:2,min:2,max:5,affinity:{action:2,observation:1},
+        phases:[['Establish one active priority','Develop the ongoing activity'],
+            ['A believable new priority redirects attention','A character chooses a different immediate objective'],
+            ['Follow through on the new activity','Explore consequences of the changed priority']],
+        transitions:['Abrupt but motivated switch','A practical redirection','A character-led change of focus']},
+    anticlimax:{title:'Deliberate anti-climax',weight:2,min:2,max:4,affinity:{dialogue:1,social:1,observation:1},
+        phases:[['Allow an expectation to form naturally','Notice an apparent opportunity for drama'],
+            ['Let the obvious reaction fail to happen','Someone chooses a mundane concern instead'],
+            ['Continue with ordinary life','Give a trivial detail disproportionate attention']],
+        transitions:['Expectation quietly deflated','A casual refusal to escalate','Ordinary action takes over']},
+    mosaic:{title:'Mosaic of moments',weight:1,min:2,max:5,affinity:{observation:2,social:1},
+        phases:[['Notice a distinctive small behavior','Focus on a mundane physical detail'],
+            ['Follow a nearby independent activity','A minor social interaction occupies the foreground'],
+            ['Let a separate observation develop','Return to an earlier detail, optionally']],
+        transitions:['Loose associative cuts','A collection of adjacent moments','Brief focus changes']},
+    reverse:{title:'Consequence first',weight:1,min:2,max:4,affinity:{consequence:2,observation:1},
+        phases:[['Begin with the immediate result of an established or plausible action','Start from a present consequence'],
+            ['Briefly reveal the cause through concrete context','Let preceding actions become clear without a long flashback'],
+            ['Continue from the consequence','Show what the new circumstance makes possible']],
+        transitions:['Short backward glance','A reveal through physical evidence','Present consequence followed by its origin']},
+    time:{title:'Elastic time',weight:1,min:2,max:4,affinity:{action:1,observation:2},
+        phases:[['Begin in one ongoing activity','Stay close to a small present moment'],
+            ['Skip an uneventful stretch of time','Compress repeated ordinary actions'],
+            ['Reveal change through a fresh detail','Return attention to what has shifted']],
+        transitions:['Unannounced short time skip','Compressed routine then close detail','Brief ellipsis']}
 };
-const SCE_STRUCTURE_ENDINGS = [
-    'Finish on a completed small action, not a hook.',
-    'Stay with the current activity as it continues.',
-    'End with a distinctive behavior or physical detail.',
+const SCE_STRUCTURE_ENDINGS = ['Finish on a completed small action, not a hook.',
+    'Stay with the current activity as it continues.','End with a distinctive behavior or physical detail.',
     'Leave a conversation naturally ongoing without directing a question to the user.',
-    'Allow a new ordinary priority to be underway.',
-    'Stop after a meaningful change in circumstances; no forced cliffhanger.',
-];
-const SCE_STRUCTURE_HISTORY = new Map();
-const SCE_STRUCTURE_ANCHORS = new Map();
+    'Allow a new ordinary priority to be underway.','Stop after a meaningful change; no forced cliffhanger.'];
+const SCE_STOP = new Set(('a about after again all already also am an and any are as at back be because '+
+    'been before being between both but by can cannot could did do does doing dont down each either '+
+    'else even every for from get gets getting give go going got had has have having he her here him '+
+    'his how i if im in into is it its just know like make many may me might more most much my no '+
+    'not now of off on one only or other our out over own really said say she should since so some '+
+    'still such than that the their them then there these they this those through to too under up '+
+    'us very was we were what when where which while who why will with would yes you your yourself '+
+    'character char user assistant system model prompt story scenes scene thoughts response message '+
+    'messages words text instruction instructions').split(' '));
+const SCE_HIDDEN_TAGS = ['think','thinking','analysis','reasoning','cot','brainstorm','planning',
+    'tracker','scene_tracker','state_tracker','sce_tracker','hidden','ooc','metadata','script','style'];
+const SCE_ADV_DEFAULTS = {intensity:55,maxLayers:3,contextGravity:75,contextScope:'full',customKeywords:'',keywordBoost:30,antiRepeat:true};
+const SCE_STRUCTURE_DEFAULTS = {structureEnabled:false,structureInfluence:65,beatDensity:55,structureGrounding:75,structureAntiRepeat:true};
+const SCE_FEEDBACK_DEFAULTS = {feedbackObserverEnabled:false,feedbackBalancerEnabled:false,feedbackStrength:65,feedbackWindow:8};
+const SCE_ENDING_WATCH_DEFAULTS = {endingWatchEnabled:false,endingWatchStrength:85,endingWatchWindow:8,endingWatchMinimum:3};
 
-function sceStructureSettings(context = globalThis.SillyTavern?.getContext?.()) {
-    return sceSettings(context);
+function sceContext() { return globalThis.SillyTavern?.getContext?.(); }
+function sceObject(value) { return !!value && typeof value==='object' && !Array.isArray(value); }
+function sceBound(value,fallback,lo,hi) { const n=Number(value); return Number.isFinite(n)?Math.max(lo,Math.min(hi,Math.round(n))):fallback; }
+function scePresetMatch(s) { return Object.keys(SCE_PRESETS).find(k=>Object.entries(SCE_PRESETS[k]).every(([p,v])=>s[p]===v))||'custom'; }
+function sceSettings(context=sceContext()) {
+    const store=sceObject(context?.extensionSettings)?context.extensionSettings:{};
+    let s=store[SCE_SETTINGS_KEY];
+    if(!sceObject(s)) s=store[SCE_SETTINGS_KEY]={};
+    if(!['automatic','tool','off'].includes(s.mode))s.mode='automatic';
+    if(typeof s.enabled!=='boolean')s.enabled=s.mode!=='off';
+    if(!['user','system'].includes(s.role))s.role='user';
+    for(const [key,value] of Object.entries({...SCE_ADV_DEFAULTS,...SCE_STRUCTURE_DEFAULTS,...SCE_FEEDBACK_DEFAULTS,...SCE_ENDING_WATCH_DEFAULTS}))
+        if(s[key]===undefined)s[key]=value;
+    for(const key of [...SCE_FEATURES,'antiRepeat','structureAntiRepeat','autopilotEnabled'])
+        if(typeof s[key]!=='boolean')s[key]=['antiRepeat','structureAntiRepeat'].includes(key);
+    if(typeof s.notifyAfterReply!=='boolean')s.notifyAfterReply=true;
+    for(const [key,fallback] of Object.entries({intensity:55,contextGravity:75,keywordBoost:30,structureInfluence:65,
+        beatDensity:55,structureGrounding:75,feedbackStrength:65,endingWatchStrength:85}))s[key]=sceBound(s[key],fallback,0,100);
+    s.maxLayers=sceBound(s.maxLayers,3,1,5);
+    if(!['full','recent'].includes(s.contextScope))s.contextScope='full';
+    for(const key of ['customKeywords','hiddenTags'])s[key]=typeof s[key]==='string'?s[key].slice(0,2400):'';
+    for(const key of ['feedbackWindow','endingWatchWindow'])s[key]=[4,8,16].includes(Number(s[key]))?Number(s[key]):8;
+    s.endingWatchMinimum=Math.min(s.endingWatchWindow,[3,4,5].includes(Number(s.endingWatchMinimum))?Number(s.endingWatchMinimum):3);
+    for(const [field,defs] of [['categoryWeights',SCE_CATEGORIES],['structureWeights',SCE_STRUCTURE_FAMILIES]]) {
+        if(!sceObject(s[field]))s[field]={};
+        for(const [id,def] of Object.entries(defs))s[field][id]=sceBound(s[field][id],def.weight,0,3);
+    }
+    if(!sceObject(s.featureOverrides))s.featureOverrides={};
+    for(const key of SCE_FEATURES)if(!['auto','on','off'].includes(s.featureOverrides[key]))s.featureOverrides[key]='auto';
+    // Fixed output formatting is not a novelty objective unless explicitly opted in.
+    if(!sceObject(s.balanceTraits))s.balanceTraits={quotationBand:true,paragraphShape:false,endingMark:false};
+    for(const key of ['quotationBand','paragraphShape','endingMark'])if(typeof s.balanceTraits[key]!=='boolean')s.balanceTraits[key]=key==='quotationBand';
+    s.autopilotPreset=scePresetMatch(s);
+    s.schemaVersion=171;
+    return s;
 }
-function sceStructureSignals(context) {
-    const chat = Array.isArray(context?.chat) ? context.chat : [];
-    const recent = chat.slice(-12)
-        .filter(m => m && !m.is_system && typeof m.mes === 'string' &&
-            !m.extra?.tool_calls && !m.extra?.tool_result)
-        .map(m => sceStoryText(m.mes).slice(0, 2500)).join('\n');
-    const count = (re) => Math.min(5, (recent.match(re) || []).length);
-    return {
-        dialogue: count(/["“”]|(?:\b(?:said|asked|replied|whispered|shouted|spoke|told)\b)/giu),
-        action: count(/\b(?:grabbed|lifted|opened|closed|walked|ran|moved|sat|stood|picked|dropped|carried|pushed|pulled|reached|turned|shoved|placed|held|touched|followed)\b/giu),
-        consequence: count(/\b(?:again|already|because|afterward|remembered|earlier|forgot|returned|result|therefore|owed)\b/giu),
-        social: count(/\b(?:friend|guest|neighbor|partner|family|apology|promise|jealous|trust|argument)\b/giu),
-        observation: count(/\b(?:noticed|watched|saw|heard|glanced|looked|observed|realized|stared|wondered)\b/giu),
-    };
+function sceOn(s,key) {
+    if(!s?.enabled || s.mode==='off')return false;
+    const override=s.featureOverrides?.[key];
+    return override==='off'?false:override==='on'?true:!!(s.autopilotEnabled||s[key]);
 }
-function sceStructureTargetCount(density) {
-    const baseline = 1 + Math.round(density * 4 / 100);
-    // A little variation at intermediate settings avoids a fixed number per turn.
-    const jitter = density > 10 && density < 90 ? randomInt(3) - 1 : 0;
-    return Math.min(5, Math.max(1, baseline + jitter));
+function sceEffective(s,key) {
+    if(!sceOn(s,key))return false;
+    if(key==='structureEnabled')return s.structureInfluence>0&&Object.values(s.structureWeights).some(x=>x>0);
+    if(key==='feedbackBalancerEnabled')return sceEffective(s,'structureEnabled')&&sceOn(s,'feedbackObserverEnabled')&&s.feedbackStrength>0;
+    if(key==='endingWatchEnabled')return s.endingWatchStrength>0;
+    return true;
 }
-function sceStructureBlueprint(familyId, count) {
-    const first = [], middle = [], last = [];
-    const families = SCE_STRUCTURE_FAMILIES;
-    const f = families[familyId];
-    const choose = (set) => pick(set);
-    if (familyId === 'sustained') {
-        first.push(choose(f.phases[0]));
-        if (count > 1) last.push(choose(f.phases[1]));
-        return [...first, ...last];
-    }
-    if (familyId === 'parallel') {
-        // Threads are independent; meeting is never mandatory.
-        for (let i = 0; i < count; i++) {
-            if (i % 2 === 0) middle.push('Thread A: ' + choose(f.phases[0]));
-            else middle.push('Thread B: ' + choose(f.phases[1]));
-        }
-        if (count >= 4 && sceChance(30)) middle[middle.length - 1] = choose(f.phases[2]);
-        return middle;
-    }
-    if (familyId === 'mosaic') {
-        for (let i = 0; i < count; i++)
-            middle.push(choose(f.phases[i % f.phases.length]));
-        return middle;
-    }
-    if (familyId === 'pivot') {
-        const turn = Math.max(1, Math.min(count - 1, 1 + randomInt(Math.max(1, count - 1))));
-        for (let i = 0; i < count; i++) {
-            middle.push(i < turn ? choose(f.phases[0]) :
-                i === turn ? choose(f.phases[1]) : choose(f.phases[2]));
-        }
-        return middle;
-    }
-    if (familyId === 'echo') {
-        first.push(choose(f.phases[0]));
-        for (let i = 0; i < count - 2; i++) middle.push(choose(f.phases[1]));
-        last.push(choose(f.phases[2]));
-        return [...first, ...middle, ...last];
-    }
-    if (familyId === 'reverse' || familyId === 'time' || familyId === 'anticlimax' || familyId === 'dialogue') {
-        first.push(choose(f.phases[0]));
-        for (let i = 0; i < count - 2; i++) middle.push(choose(f.phases[1]));
-        last.push(choose(f.phases[2]));
-        return count === 2 ? [first[0], choose(f.phases[1])] : [...first, ...middle, ...last];
-    }
-    // Domino: start with an action, then follow whatever consequences make sense.
-    first.push(choose(f.phases[0]));
-    for (let i = 0; i < count - 2; i++) middle.push(choose(f.phases[1]));
-    last.push(choose(f.phases[2]));
-    return count === 2 ? [first[0], last[0]] : [...first, ...middle, ...last];
+function sceApplyPreset(context,name) {
+    if(!SCE_PRESETS[name])return false;
+    Object.assign(sceSettings(context),SCE_PRESETS[name]);
+    context?.saveSettingsDebounced?.();
+    sceRefreshUI();
+    return true;
 }
-function sceStructureAttention(count, influence) {
-    const spread = Math.max(1, Math.ceil(influence / 25));
-    const weights = Array.from({length:count}, () => 1 + randomInt(spread + 1));
-    if (weights.length > 1 && weights.every(w => w === weights[0])) {
-        const at = randomInt(count);
-        weights[at] = weights[at] === 1 ? 2 : weights[at] - 1;
-    }
-    return weights;
+class SceBoundedMap extends Map {
+    constructor(limit=12){super();this.limit=limit;}
+    set(key,value){super.delete(key);super.set(key,value);while(this.size>this.limit)super.delete(this.keys().next().value);return this;}
+    get(key){if(!super.has(key))return undefined;const value=super.get(key);super.delete(key);super.set(key,value);return value;}
 }
-function sceStructuralRoll(context = globalThis.SillyTavern?.getContext?.(), preview = false, type = 'normal') {
-    const options = sceStructureSettings(context);
-    if (!sceOn(options, 'structureEnabled') || options.structureInfluence <= 0) return null;
-    const key = getChatKey();
-    const grounding = options.structureGrounding / 100;
-    const influence = options.structureInfluence / 100;
-    const signals = sceStructureSignals(context);
-    const history = SCE_STRUCTURE_HISTORY.get(key) || [];
-    const recentFamilyIds = history.slice(0, 4).map(x => x.family);
-    const target = sceStructureTargetCount(options.beatDensity);
-    const pool = Object.entries(SCE_STRUCTURE_FAMILIES)
-        .filter(([id]) => options.structureWeights[id] > 0)
-        .map(([id, family]) => {
-            const compatible = Object.entries(family.affinity)
-                .reduce((value, [signal, weight]) => value + (signals[signal] || 0) * weight, 0);
-            const noveltyBoost = ['mosaic','reverse','pivot','time','anticlimax'].includes(id) ? 1 + influence : 1;
-            const distancePenalty = 1 / (1 + Math.max(0, family.min - target));
-            return {
-                value: id,
-                weight: options.structureWeights[id] * noveltyBoost *
-                    (1 + grounding * Math.min(8, compatible) * .14) * distancePenalty,
-            };
-        });
-    if (!pool.length) return null;
+const SCE_FALLBACK_CHAT_IDS=new WeakMap();let sceFallbackChatCounter=0;
+function getChatKey(context=sceContext()) {
+    const avatar=context?.characters?.[context?.characterId]?.avatar;
+    const owner=context?.groupId!=null?'group:'+context.groupId:'character:'+(avatar??context?.characterId??'local');
+    const id=context?.chatId??context?.getCurrentChatId?.()??context?.chatMetadata?.chat_id;
+    if(id!=null)return owner+'|'+String(id);
+    const chat=context?.chat;
+    if(chat&&typeof chat==='object'){
+        if(!SCE_FALLBACK_CHAT_IDS.has(chat))SCE_FALLBACK_CHAT_IDS.set(chat,++sceFallbackChatCounter);
+        return owner+'|temporary:'+SCE_FALLBACK_CHAT_IDS.get(chat);
+    }
+    return owner+'|unselected';
+}
+function randomInt(max) {
+    if(!Number.isSafeInteger(max)||max<1||max>0x100000000)throw new RangeError('Random range must be 1..2^32');
+    if(globalThis.crypto?.getRandomValues){const limit=0x100000000-(0x100000000%max),a=new Uint32Array(1);
+        do{globalThis.crypto.getRandomValues(a);}while(a[0]>=limit);return a[0]%max;}
+    return Math.floor(Math.random()*max);
+}
+function pick(values){return values.length?values[randomInt(values.length)]:null;}
+function pickFresh(values,recent){const fresh=values.filter(x=>!recent.includes(x));return pick(fresh.length?fresh:values);}
+function sceChance(pct){return randomInt(10000)<pct*100;}
+function sceWeighted(items){const pool=items.filter(x=>Number.isFinite(x.weight)&&x.weight>0);if(!pool.length)return null;
+    let n=randomInt(1000000)/1000000*pool.reduce((a,x)=>a+x.weight,0);for(const x of pool){n-=x.weight;if(n<0)return x.value;}return pool.at(-1).value;}
+function sceFeedbackHash(text){let h=2166136261;for(let i=0;i<text.length;i++){h^=text.charCodeAt(i);h=Math.imul(h,16777619);}return(h>>>0).toString(16)+':'+text.length;}
 
-    // Optional empirical feedback only. No hardcoded preferred style or
-    // unearned assumptions about what each structural family will produce.
-    if (!preview && sceOn(options, 'feedbackObserverEnabled') && sceOn(options, 'feedbackBalancerEnabled')) {
-        const report = sceFeedbackObserve(context, type);
-        const observed = sceFeedbackFactors(context, report);
-        for (const item of pool) {
-            item.weight *= observed.factors.get(item.value)?.factor || 1;
+// Per-message immutable snapshots. Bounded even when many chats stay reachable.
+const SCE_RECORD_CACHE=new SceBoundedMap(256);
+const sceWordIndexCache=new SceBoundedMap(12);
+const SCE_MESSAGE_STATUS=new WeakMap();
+const SCE_ANALYSIS_COUNTERS={records:0,tokenizations:0,indexBuilds:0,indexDeltas:0,motifBuilds:0};
+function sceTagNames(extra=''){
+    return new Set([...SCE_HIDDEN_TAGS,...String(extra).toLowerCase().split(/[\s,;]+/u).filter(x=>/^[a-z][a-z0-9_:-]{0,39}$/u.test(x))]);
+}
+function sceStoryText(value,extra='') {
+    const hidden=sceTagNames(extra),raw=String(value??'').replace(/<!--[\s\S]*?(?:-->|$)/gu,' ');
+    const tag=/<\/?([a-z][\w:-]*)\b[^>]*(?:>|$)/giu;
+    const stack=[];let pos=0,out='';
+    for(const m of raw.matchAll(tag)){
+        if(!stack.length)out+=raw.slice(pos,m.index);
+        const name=m[1].toLowerCase(),closing=m[0].startsWith('</'),self=/\/\s*>$/u.test(m[0]);
+        if(hidden.has(name)){
+            if(closing){const i=stack.lastIndexOf(name);if(i>=0)stack.splice(i);}
+            else if(!self)stack.push(name);
+        } else if(!stack.length)out+=name==='br'?'\n':name==='p'?'\n\n':' ';
+        pos=m.index+m[0].length;
+    }
+    if(!stack.length)out+=raw.slice(pos);
+    // Common non-HTML tracker wrappers; no assumptions about arbitrary brackets.
+    out=out.replace(/\[(think|analysis|reasoning|planning|tracker|sce_tracker|ooc)\][\s\S]*?(?:\[\/\1\]|$)/giu,' ');
+    return out.replace(/https?:\/\/\S+/gu,' ').replace(/\{\{[^}]+\}\}/gu,' ');
+}
+function sceFeedbackTextTokens(text){return String(text).toLowerCase().match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)||[];}
+function sceTokenize(text){
+    SCE_ANALYSIS_COUNTERS.tokenizations++;
+    return sceFeedbackTextTokens(text).filter(x=>x.length>=(/[\u3040-\u30ff\u3400-\u9fff]/u.test(x)?2:3)&&x.length<=28&&!SCE_STOP.has(x)&&!/^\d+$/u.test(x));
+}
+function sceEdgeSample(text,max){return text.length<=max?[text]:[text.slice(0,max/2),text.slice(-max/2)];}
+function sceBuildRecord(raw,hiddenTags=''){
+    SCE_ANALYSIS_COUNTERS.records++;
+    const clean=sceStoryText(raw,hiddenTags),segments=sceEdgeSample(clean,4000);
+    // Segment edges stay separate: never fabricate co-occurrences across an omission.
+    const counts=new Map(),nearby=new Map(),unique=new Set();
+    for(const segment of segments){const words=sceTokenize(segment);
+        for(let j=0;j<words.length;j++){
+            const w=words[j];unique.add(w);counts.set(w,(counts.get(w)||0)+1);
+            const co=nearby.get(w)||new Map();
+            for(let k=Math.max(0,j-2);k<=Math.min(words.length-1,j+2);k++)if(j!==k&&words[k]!==w)
+                co.set(words[k],(co.get(words[k])||0)+1/(1+Math.abs(k-j)));
+            nearby.set(w,co);
         }
     }
-
-    // Exclude the last four families when alternatives exist; if every enabled
-    // family was just used, fall back gracefully rather than returning nothing.
-    const freshFamilies = options.structureAntiRepeat
-        ? pool.filter(item => !recentFamilyIds.includes(item.value)) : pool;
-    const familyId = sceWeighted(freshFamilies.length ? freshFamilies : pool);
-    const family = SCE_STRUCTURE_FAMILIES[familyId];
-    const count = Math.max(family.min, Math.min(family.max, target));
-    // Re-roll the internal arrangement if it duplicates a recent blueprint.
-    // This also helps when a user enables only one structural family.
-    let beats, attention, transition, ending, signature;
-    for (let attempt = 0; attempt < 6; attempt++) {
-        beats = sceStructureBlueprint(familyId, count);
-        attention = sceStructureAttention(count, options.structureInfluence);
-        transition = pick(family.transitions);
-        ending = pick(SCE_STRUCTURE_ENDINGS);
-        signature = familyId + ':' + count + ':' + attention.join('-') + ':' +
-            transition + ':' + beats.join('|');
-        if (!options.structureAntiRepeat || !history.some(item => item.signature === signature)) break;
-    }
-    const index = sceWordIndex(context);
-    const oldAnchors = SCE_STRUCTURE_ANCHORS.get(key) || [];
-    const candidates = options.structureAntiRepeat
-        ? index.options.filter(x => !oldAnchors.includes(x.value)) : index.options;
-    const anchors = [];
-    const maxAnchors = options.structureGrounding > 60 ? 2 : 1;
-    for (let i = 0; i < maxAnchors && index.options.length; i++) {
-        if (!sceChance(options.structureGrounding)) break;
-        const remaining = (candidates.length ? candidates : index.options)
-            .filter(x => !anchors.includes(x.value));
-        if (!remaining.length) break;
-        const word = sceWeighted(remaining);
-        if (word) anchors.push(word);
-    }
-    if (!preview && anchors.length) SCE_STRUCTURE_ANCHORS.set(key,
-        [...anchors, ...oldAnchors].slice(0, 10));
-    if (!preview) SCE_STRUCTURE_HISTORY.set(key,
-        [{family:familyId,signature}, ...history].slice(0, 8));
-    return {
-        family: family.title,
-        familyId,
-        count,
-        beats: beats.map((role,i) => ({role,attention:attention[i]})),
-        attention,
-        transition, ending, anchors,
-        influence: options.structureInfluence,
-        grounding: options.structureGrounding,
-        kind: options.structureInfluence >= 75 ? 'strong creative preference' :
-            options.structureInfluence >= 40 ? 'moderate nudge' : 'light suggestion',
-    };
+    return {raw,clean,hiddenTags,signature:sceFeedbackHash(raw),counts,nearby,unique,
+        sampledChars:segments.reduce((a,s)=>a+s.length,0),fingerprint:null,motifs:new Map()};
 }
-function sceFormatStructure(structure) {
-    if (!structure) return '';
-    const lines = [
-        '[STRUCTURAL ENTROPY: OPTIONAL RESPONSE ARCHITECTURE, NOT PREWRITTEN PLOT]',
-        'Structural family: ' + structure.family + ' (' + structure.kind + ')',
-        'Development density: ' + structure.count + ' area(s) of attention, not paragraph requirements',
-        'Relative attention: ' + structure.attention.join(' : '),
-        'Connection style: ' + structure.transition,
-    ];
-    if (structure.anchors.length) {
-        lines.push('Existing story words to consider (not mandatory): ' +
-            structure.anchors.map(x => '"' + x + '"').join(', '));
-    }
-    lines.push('Possible abstract phases:');
-    for (let i = 0; i < structure.beats.length; i++) {
-        lines.push((i+1) + '. ' + structure.beats[i].role);
-    }
-    const adherence = structure.influence >= 80
-        ? 'Strong execution: let this selected architecture visibly determine the next passage\'s distribution of attention. Use its distinct phases where continuity permits rather than falling back to a familiar reaction-dialogue-closing pattern.'
-        : structure.influence >= 50
-            ? 'Moderate execution: make the selected architecture recognizable in the next passage when consistent with the scene. Do not merely mention the idea and then follow the usual story rhythm.'
-            : 'Gentle execution: allow the selected architecture to influence the next passage without turning it into a rigid outline.';
-    lines.push(
-        'Structure execution: ' + adherence,
-        'Suggested closing behavior: ' + structure.ending,
-        'Create actual events and character behavior only from the established fiction. No new user-character decisions or dialogue.',
-        'Phases indicate distribution of narrative attention, not fixed events, required escalations, or a beat-by-beat outline.',
-        'If the current scene naturally supports fewer or different developments, merge or skip phases. Do not force a payoff.',
-        'Do not override existing word count, paragraph, narration, dialogue, or continuity requirements.',
-        'Do not mention these directions in the fiction.',
-        '[/STRUCTURAL ENTROPY]'
-    );
-    return lines.join('\n');
+function sceRecord(message,s=sceSettings()){
+    const raw=String(message?.mes??'');const hit=SCE_RECORD_CACHE.get(message);
+    if(hit&&hit.raw===raw&&hit.hiddenTags===s.hiddenTags)return hit;
+    const record=sceBuildRecord(raw,s.hiddenTags);
+    if(message&&typeof message==='object')SCE_RECORD_CACHE.set(message,record);
+    return record;
 }
-function sceFormatCombined(creativeRoll, structure, endingWatch = null) {
-    const sections = [sceFormatPrompt(creativeRoll)];
-    if (structure) sections.push(sceFormatStructure(structure));
-    if (endingWatch) sections.push(sceFormatEndingWatch(endingWatch));
-    return sections.join('\n\n');
+function sceFeedbackMessageEligible(m){
+    if(!m||m.is_user!==false||m.is_system||(m.gen_started!=null&&m.gen_finished==null)||typeof m.mes!=='string'||!m.mes.trim()||m.mes.trim()==='...'
+        ||m.extra?.tool_calls||m.extra?.tool_result||m.extra?.type||m.extra?.is_partial||m.extra?.incomplete
+        ||m.mes.trimStart().startsWith('[STORY CHAOS ENGINE'))return false;
+    const ctx=sceContext(),processor=ctx?.streamingProcessor;
+    if(processor&&ctx.chat?.[processor.messageId]===m&&(!processor.isFinished||processor.isStopped||processor.abortController?.signal?.aborted))return false;
+    const known=SCE_MESSAGE_STATUS.get(m);
+    return !known||known.raw!==m.mes||known.state==='completed';
 }
-
-/* Neutral Structural Observer & optional empirical Balancer (v1.5).
- *
- * Observer: surface measurements of previous model replies, never opinions
- * about tone, morality, quality, character decisions or desirable outcomes.
- *
- * Balancer: learns associations between structural families and *measured*
- * reply fingerprints in this browser session. It has no fixed target style.
- * Only repeated observed traits may affect family weights, and only after
- * at least two confirmed matched outcomes for an individual family.
- * The original family-weight selection remains untouched when evidence
- * is insufficient. No extra network requests or model calls.
- */
-const SCE_FEEDBACK_DEFAULTS = Object.freeze({
-    feedbackObserverEnabled: false,
-    feedbackBalancerEnabled: false,
-    feedbackStrength: 65,
-    feedbackWindow: 8,
-});
-const SCE_FEEDBACK_STATES = new Map();
-const SCE_FEEDBACK_TRAITS = Object.freeze([
-    ['quotationBand', 'Quotation coverage band'],
-    ['paragraphShape', 'Paragraph-length arrangement'],
-    ['endingMark', 'Terminal punctuation'],
-]);
-
-function sceFeedbackMessageEligible(m) {
-    return !!m && m.is_user === false && !m.is_system &&
-        typeof m.mes === 'string' && m.mes.trim().length > 0 &&
-        !m.extra?.tool_calls && !m.extra?.tool_result && !m.extra?.type &&
-        !m.mes.trimStart().startsWith('[STORY CHAOS ENGINE');
-}
-
-function sceFeedbackHash(text) {
-    // A lightweight version signature used ONLY to invalidate edited/swiped
-    // reply associations. Not a security or identity hash.
-    let hash = 2166136261;
-    for (let i = 0; i < text.length; i++) {
-        hash ^= text.charCodeAt(i);
-        hash = Math.imul(hash, 16777619);
-    }
-    return (hash >>> 0).toString(16) + ':' + text.length;
-}
-function sceFeedbackTextTokens(text) {
-    const tokens=String(text).toLocaleLowerCase().match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)||[];
-    if(tokens.length<=2200)return tokens;
-    // Keep actual opening and closing tokens even in very long completions.
-    return [...tokens.slice(0,1100),'__truncated__',...tokens.slice(-1099)];
-}
-function sceFeedbackFingerprint(messageOrText) {
-    const raw = typeof messageOrText === 'string' ? messageOrText : messageOrText?.mes || '';
-    const plain=sceStoryText(raw);
-    // Sample both edges, rather than incorrectly treating an early truncation
-    // point as the actual reply ending.
-    const text=plain.length<=16000 ? plain :
-        plain.slice(0,8000)+'\n\n'+plain.slice(-8000);
-    const tokens = sceFeedbackTextTokens(text);
-    const blocks = text.trim().split(/\n\s*\n+/u).filter(x => x.trim());
-    const sizes = blocks.map(x => sceFeedbackTextTokens(x).length);
-    const total = sizes.reduce((a,b)=>a+b, 0) || 1;
-    const firstShare = sizes.length ? sizes[0] / total : 0;
-    const lastShare = sizes.length ? sizes[sizes.length-1] / total : 0;
-    const avg = total / Math.max(1,sizes.length);
-    const variation = sizes.length <= 1 ? 0 :
-        Math.sqrt(sizes.reduce((sum,n)=>sum+Math.pow(n-avg,2),0) / sizes.length) / Math.max(1,avg);
-    const paragraphShape = sizes.length <= 1 ? 'single' :
-        firstShare >= 0.60 ? 'front-heavy' :
-        lastShare >= 0.60 ? 'back-heavy' :
-        variation <= 0.3 ? 'even' : 'mixed';
-    // Exact quote-delimiter matching. This is not a semantic dialogue detector.
-    let quoteChars = 0;
-    const quoteExp = /"([^"\n]{1,1500})"|“([^”\n]{1,1500})”/gu;
-    for (const match of text.matchAll(quoteExp)) quoteChars += (match[1] || match[2] || '').length;
-    const quotationShare = quoteChars / Math.max(1,text.length);
-    const quotationBand = quotationShare < .20 ? 'under 20%' :
-        quotationShare < .60 ? '20–60%' : 'over 60%';
-    // Remove trailing formatting and closing quotes, not substantive marks.
-    const terminal = text.trim().replace(/[\s*_\x60"'”’\])}]+$/gu,'').slice(-1);
-    const endingMark = terminal === '?' ? 'question mark' :
-        terminal === '!' ? 'exclamation mark' :
-        terminal === '.' ? 'period' :
-        terminal === '…' ? 'ellipsis' : 'other';
-    const phrases = new Set();
-    for (let i=0; i<tokens.length-3; i++) {
-        if (!tokens.slice(i,i+4).includes('__truncated__'))
-            phrases.add(tokens.slice(i,i+4).join(' '));
-    }
-    return {
-        signature: sceFeedbackHash(raw),
-        wordCount: tokens.length,
-        paragraphs: sizes.length,
-        quotationShare, quotationBand, paragraphShape, endingMark,
-        openingFour: tokens.slice(0,4).join(' '),
-        closingFour: tokens.slice(-4).join(' '),
-        fourGrams: phrases,
-    };
-}
-const SCE_REPLY_FINGERPRINT_CACHE = new WeakMap();
-function sceFeedbackReplyEntries(context, window, type='normal') {
-    const chat = Array.isArray(context?.chat) ? context.chat : [];
-    const entries = [];
-    for (let i=0;i<chat.length;i++)
-        if (sceFeedbackMessageEligible(chat[i])) entries.push({index:i,message:chat[i]});
-    // A regenerating/swiping reply is about to be replaced, not evidence.
-    if ((type==='swipe'||type==='regenerate') && entries.length) entries.pop();
-    return entries.slice(-window);
-}
-function sceFeedbackCachedFingerprint(message) {
-    const signature = sceFeedbackHash(message?.mes || '');
-    const cached = SCE_REPLY_FINGERPRINT_CACHE.get(message);
-    if (cached?.signature===signature) return cached.fingerprint;
-    const fingerprint=sceFeedbackFingerprint(message);
-    SCE_REPLY_FINGERPRINT_CACHE.set(message,{signature,fingerprint});
-    return fingerprint;
-}
-function sceFeedbackReplySamples(context, window, type='normal') {
-    return sceFeedbackReplyEntries(context,window,type)
-        .map(x=>({...x,fingerprint:sceFeedbackCachedFingerprint(x.message)}));
-}
-
-function sceFeedbackDominant(samples) {
-    if (samples.length < 4) return [];
-    const results = [];
-    for (const [key, label] of SCE_FEEDBACK_TRAITS) {
-        const frequencies = new Map();
-        for (const sample of samples) {
-            const value = sample.fingerprint[key];
-            frequencies.set(value,(frequencies.get(value)||0)+1);
-        }
-        const [value,count] = [...frequencies].sort((a,b)=>b[1]-a[1])[0];
-        if (count >= Math.ceil(samples.length * .67)) {
-            results.push({key, label, value, count, total:samples.length});
-        }
-    }
-    return results;
-}
-function sceFeedbackObserve(context, type='normal') {
-    const config = sceSettings(context);
-    const window = config.feedbackWindow;
-    const samples = sceFeedbackReplySamples(context, window, type);
-    const frequencies = key => {
-        const result = {};
-        for (const sample of samples) {
-            const value = sample.fingerprint[key];
-            result[value] = (result[value] || 0) + 1;
-        }
-        return result;
-    };
-    const median = values => {
-        if (!values.length) return 0;
-        const a = [...values].sort((x,y)=>x-y);
-        return (a[Math.floor((a.length-1)/2)] + a[Math.floor(a.length/2)]) / 2;
-    };
-    const repeated = key => {
-        const occur = new Map();
-        for (const x of samples) {
-            const phrase = x.fingerprint[key];
-            if (phrase.length) occur.set(phrase,(occur.get(phrase)||0)+1);
-        }
-        return [...occur.values()].filter(n=>n>1).reduce((a,b)=>a+b,0);
-    };
-    const fourgramDocFrequency = new Map();
-    for (const x of samples) for (const phrase of x.fingerprint.fourGrams) {
-        fourgramDocFrequency.set(phrase,(fourgramDocFrequency.get(phrase)||0)+1);
-    }
-    const repeats = [...fourgramDocFrequency.values()].filter(v=>v>=2).length;
-    return {
-        available: samples.length,
-        window,
-        medianWords: median(samples.map(x=>x.fingerprint.wordCount)),
-        medianParagraphs: median(samples.map(x=>x.fingerprint.paragraphs)),
-        meanQuotationPercent: samples.length ?
-            Math.round(100 * samples.reduce((sum,x)=>sum+x.fingerprint.quotationShare,0)/samples.length) : 0,
-        quotationBands: frequencies('quotationBand'),
-        paragraphShapes: frequencies('paragraphShape'),
-        endings: frequencies('endingMark'),
-        repeatedOpeningReplies: repeated('openingFour'),
-        repeatedClosingReplies: repeated('closingFour'),
-        sharedFourTokenSequences: repeats,
-        dominant: sceFeedbackDominant(samples),
-        // Only in-memory aggregate/fingerprint information; not raw chat.
-        samples,
-    };
-}
-function sceFeedbackState(context) {
-    const key = getChatKey();
-    if (!SCE_FEEDBACK_STATES.has(key)) {
-        SCE_FEEDBACK_STATES.set(key,{pending:null,outcomes:[]});
-        if (SCE_FEEDBACK_STATES.size > 12) {
-            SCE_FEEDBACK_STATES.delete(SCE_FEEDBACK_STATES.keys().next().value);
-        }
-    }
-    return SCE_FEEDBACK_STATES.get(key);
-}
-function sceFeedbackReconcile(context, type='normal') {
-    const state = sceFeedbackState(context);
-    const chat = Array.isArray(context?.chat) ? context.chat : [];
-    if (state.pending) {
-        const i = chat.findIndex((msg,idx)=>idx>=state.pending.startIndex &&
-            sceFeedbackMessageEligible(msg));
-        if (i>=0) {
-            const fingerprint = sceFeedbackFingerprint(chat[i]);
-            state.outcomes = state.outcomes.filter(o=>o.index!==i);
-            state.outcomes.push({
-                family:state.pending.family, index:i,
-                signature:fingerprint.signature,
-                fingerprint: {
-                    quotationBand:fingerprint.quotationBand,
-                    paragraphShape:fingerprint.paragraphShape,
-                    endingMark:fingerprint.endingMark,
-                },
-            });
-            state.outcomes=state.outcomes.slice(-96);
-        }
-        // A missing response was likely aborted; never guess an attribution.
-        state.pending=null;
-    }
-    // A swipe or regenerate replaces the last assistant response. Discard its
-    // recorded association, rather than learning from a replaced outcome.
-    if (type==='swipe'||type==='regenerate') {
-        let lastAssistant=-1;
-        for(let i=0;i<chat.length;i++) if(sceFeedbackMessageEligible(chat[i]))lastAssistant=i;
-        if(lastAssistant>=0) state.outcomes=state.outcomes.filter(x=>x.index!==lastAssistant);
-    }
-    state.outcomes=state.outcomes.filter(x=>{
-        const m=chat[x.index];
-        return sceFeedbackMessageEligible(m) && sceFeedbackHash(m.mes)===x.signature;
-    });
-    return state;
-}
-function sceFeedbackPending(context, familyId, type='normal') {
-    if(type!=='normal' || !familyId) return;
+function sceSnapshot(context=sceContext(),type='normal'){
     const chat=Array.isArray(context?.chat)?context.chat:[];
-    const state=sceFeedbackState(context);
-    state.pending={family:familyId,startIndex:chat.length};
+    const key=getChatKey(context),pending=sceLifecycleStart?.key===key?sceLifecycleStart:null;
+    let replace=pending?.type===type?pending.replacement:null;
+    // On current ST, regeneration has already removed its target before this hook.
+    // Swipe retains its target. Older hosts are supported when STARTED captured it.
+    if(type==='swipe'&&!replace&&chat.at(-1)?.is_user===false)replace=chat.at(-1);
+    return chat.map((message,index)=>({message,index})).filter(x=>x.message!==replace);
 }
-function sceFeedbackFactors(context, report) {
-    const settings=sceSettings(context);
-    const factors=new Map();
-    const diagnostics={ready:false,dominant:[],matched:0,factors};
-    if (!sceOn(settings, 'feedbackObserverEnabled') || !sceOn(settings, 'feedbackBalancerEnabled') ||
-        settings.feedbackStrength<=0 || !report || report.available<4 ||
-        report.dominant.length===0) return diagnostics;
-    const chat = Array.isArray(context?.chat) ? context.chat : [];
-    const outcomes = sceFeedbackState(context).outcomes.filter(item => {
-        // Live sessions always record an index and content signature.
-        // Check them again for read-only reports, without mutating state.
-        if (Number.isInteger(item.index) && typeof item.signature === 'string') {
-            const message = chat[item.index];
-            return sceFeedbackMessageEligible(message) &&
-                sceFeedbackHash(message.mes) === item.signature;
-        }
-        return !Number.isInteger(item.index) && item.signature == null;
-    });
-    diagnostics.dominant=report.dominant;
-    for (const id of Object.keys(SCE_STRUCTURE_FAMILIES)) {
-        const matches=outcomes.filter(x=>x.family===id);
-        if (matches.length<2) continue;
-        let meanAgreement=0;
-        for (const dominant of report.dominant) {
-            const p=matches.filter(x=>x.fingerprint[dominant.key]===dominant.value).length /
-                matches.length;
-            meanAgreement+=(1-2*p)/report.dominant.length;
-        }
-        // Scale symmetrically around 1.0. 1 = no change.
-        // Two observations imply only a small confidence adjustment.
-        const confidence=Math.min(1,(matches.length-1)/4);
-        const factor=Math.max(.6,Math.min(1.4,
-            1+(settings.feedbackStrength/100)*.4*meanAgreement*confidence));
-        factors.set(id,{factor,samples:matches.length});
-        diagnostics.matched+=matches.length;
+function sceFeedbackReplyEntries(context,window,type='normal'){
+    const source=context?._sceEntries||sceSnapshot(context,type),entries=[];
+    for(let i=source.length-1;i>=0&&entries.length<window;i--)
+        if(sceFeedbackMessageEligible(source[i].message))entries.push(source[i]);
+    return entries.reverse();
+}
+function sceFingerprintRecord(record){
+    if(record.fingerprint)return record.fingerprint;
+    const text=record.clean,tokens=sceFeedbackTextTokens(text);
+    const blocks=text.trim().split(/\n\s*\n+/u).filter(x=>x.trim()),sizes=blocks.map(x=>sceFeedbackTextTokens(x).length);
+    const total=sizes.reduce((a,b)=>a+b,0)||1,avg=total/Math.max(1,sizes.length);
+    const variation=sizes.length<=1?0:Math.sqrt(sizes.reduce((sum,n)=>sum+(n-avg)**2,0)/sizes.length)/Math.max(1,avg);
+    const paragraphShape=sizes.length<=1?'single':sizes[0]/total>=.6?'front-heavy':sizes.at(-1)/total>=.6?'back-heavy':variation<=.3?'even':'mixed';
+    let quoteChars=0;
+    for(const match of text.matchAll(/"([^"\n]+)"|“([^”\n]+)”/gu))quoteChars+=(match[1]||match[2]||'').length;
+    const quotationShare=quoteChars/Math.max(1,text.length),quotationBand=quotationShare<.2?'under 20%':quotationShare<.6?'20–60%':'over 60%';
+    const end=text.trim().replace(/[\s*_\x60"'”’\])}]+$/gu,'');
+    const endingMark=end.endsWith('…')||end.endsWith('...')?'ellipsis':({'?':'question mark','!':'exclamation mark','.':'period'}[end.slice(-1)]||'other');
+    const fourGrams=new Set();
+    const segments=tokens.length<=2200?[tokens]:[tokens.slice(0,1100),tokens.slice(-1100)];
+    for(const segment of segments)for(let i=0;i+3<segment.length;i++)fourGrams.add(segment.slice(i,i+4).join(' '));
+    return record.fingerprint={signature:record.signature,wordCount:tokens.length,paragraphs:blocks.length,
+        quotationShare,quotationBand,paragraphShape,endingMark,openingFour:tokens.slice(0,4).join(' '),
+        closingFour:tokens.slice(-4).join(' '),fourGrams,phrasesSampled:tokens.length>2200};
+}
+function sceFeedbackFingerprint(value){return sceFingerprintRecord(typeof value==='string'?sceBuildRecord(value):sceRecord(value));}
+function sceFeedbackCachedFingerprint(message,s=sceSettings()){return sceFingerprintRecord(sceRecord(message,s));}
+function sceFeedbackReplySamples(context,window,type='normal'){
+    const s=context?._sceSettings||sceSettings(context);
+    return sceFeedbackReplyEntries(context,window,type).map(x=>({...x,fingerprint:sceFeedbackCachedFingerprint(x.message,s)}));
+}
+function sceIndexDelta(state,record,delta){
+    if(!delta)return;
+    SCE_ANALYSIS_COUNTERS.indexDeltas++;
+    for(const [word,n] of record.counts){const next=(state.counts.get(word)||0)+delta*n;
+        if(next<1e-8)state.counts.delete(word);else state.counts.set(word,next);}
+    for(const [word,links] of record.nearby){const target=state.nearby.get(word)||new Map();
+        for(const [other,n] of links){const next=(target.get(other)||0)+delta*n;
+            if(next<1e-8)target.delete(other);else target.set(other,next);}
+        if(target.size)state.nearby.set(word,target);else state.nearby.delete(word);}
+}
+function sceWordIndex(context=sceContext()){
+    const s=context?._sceSettings||sceSettings(context),key=getChatKey(context);
+    const entries=context?._sceEntries||sceSnapshot(context),records=[];let budget=300000;
+    for(let i=entries.length-1;i>=0;i--){
+        if(s.contextScope==='recent'&&records.length>=16)break;
+        const {message,index}=entries[i];
+        if(!message||message.is_system||typeof message.mes!=='string'||message.extra?.tool_calls||message.extra?.tool_result)continue;
+        const known=SCE_MESSAGE_STATUS.get(message);
+        if(known&&known.raw===message.mes&&known.state!=='completed')continue;
+        const record=sceRecord(message,s);if(record.sampledChars>budget)break;budget-=record.sampledChars;
+        const age=records.length,weight=age<3?4:age<12?2.3:age<28?1.4:.55;
+        records.push({record,message,index,age,weight});
+        if(records.length>=256)break;
     }
-    diagnostics.ready=factors.size>0;
-    return diagnostics;
+    let state=sceWordIndexCache.get(key);
+    if(!state)state={weights:new Map(),counts:new Map(),nearby:new Map(),index:null,order:[],roles:[]};
+    const desired=new Map(records.map(x=>[x.record,x.weight]));
+    const same=state.order.length===records.length&&records.every((x,i)=>state.order[i]===x.record&&state.weights.get(x.record)===x.weight&&state.roles[i]===x.message.is_user);
+    if(same&&state.index)return state.index;
+    for(const [r,w] of state.weights)if(!desired.has(r))sceIndexDelta(state,r,-w);
+    for(const [r,w] of desired)sceIndexDelta(state,r,w-(state.weights.get(r)||0));
+    state.weights=desired;state.order=records.map(x=>x.record);state.roles=records.map(x=>x.message.is_user);
+    const recent=new Set();for(const x of records.slice(0,12))for(const w of x.record.unique)recent.add(w);
+    const recentAssist=records.filter(x=>x.message.is_user===false).slice(0,8),df=new Map();
+    for(const x of recentAssist)for(const w of x.record.unique)df.set(w,(df.get(w)||0)+1);
+    const options=[...state.counts].map(([value,count])=>({value,
+        weight:Math.min(16,1+Math.log2(1+count)*2)*(1-.55*(df.get(value)||0)/Math.max(1,recentAssist.length))}));
+    state.index={options,nearby:state.nearby,recent,analyzed:records.length};
+    SCE_ANALYSIS_COUNTERS.indexBuilds++;sceWordIndexCache.set(key,state);return state.index;
 }
-function sceFeedbackReportText(context, type='normal') {
-    const report=sceFeedbackObserve(context,type);
-    const factors=sceFeedbackFactors(context,report);
-    const values=obj=>Object.entries(obj).sort((a,b)=>b[1]-a[1])
-        .map(([key,n])=>key+': '+n).join(' · ') || 'None';
-    const lines=[
-        'STRUCTURAL OBSERVER | measurable text patterns only',
-        'Model replies analyzed: '+report.available+' / '+report.window,
-        'Median words: '+report.medianWords,
-        'Median paragraphs: '+report.medianParagraphs,
-        'Mean matched quotation coverage: '+report.meanQuotationPercent+'%',
-        'Quotation coverage bands: '+values(report.quotationBands),
-        'Paragraph-length arrangements: '+values(report.paragraphShapes),
-        'Terminal punctuation: '+values(report.endings),
-        'Replies sharing an exact 4-token opening: '+report.repeatedOpeningReplies,
-        'Replies sharing an exact 4-token closing: '+report.repeatedClosingReplies,
-        'Distinct 4-token sequences present in at least 2 replies: '+report.sharedFourTokenSequences,
-        'Repeated measured traits (>=67% of observed replies): '+
-            (report.dominant.length ? report.dominant.map(x=>
-                x.label+' = '+x.value+' ('+x.count+'/'+x.total+')').join(' · ') : 'None / insufficient evidence'),
-        '',
-        'BALANCER (independent from measurements)',
-        'Observer enabled: '+(sceOn(sceSettings(context), 'feedbackObserverEnabled')?'yes':'no'),
-        'Balancer enabled: '+(sceOn(sceSettings(context), 'feedbackBalancerEnabled')?'yes':'no'),
-        'Evidence-based family adjustments: '+(factors.ready?'available':'not enough matched evidence'),
-    ];
-    const endingConfig = sceSettings(context);
-    const endingWatch = sceOn(endingConfig, 'endingWatchEnabled') ? sceEndingWatch(context, type) : null;
-    lines.push('', 'CLOSING-BEAT WATCH (lexical action and phrase recurrence)',
-        'Enabled: ' + (sceOn(endingConfig, 'endingWatchEnabled') ? 'yes' : 'no'),
-        'Recent repeated ending: ' + (endingWatch ?
-            endingWatch.label+' ('+endingWatch.count+'/'+endingWatch.total+')' :
-            'none over threshold / feature disabled'));
-
-    if (factors.ready) for (const [id,x] of factors.factors) {
-        lines.push('  '+SCE_STRUCTURE_FAMILIES[id].title+': x'+x.factor.toFixed(3)+
-            ' ('+x.samples+' matched output(s))');
+function scePersonalWords(value){return [...new Set(String(value||'').split(/[\n,;]+/gu)
+    .map(x=>x.replace(/[^\p{L}\p{M}\p{N}\s'’-]/gu,' ').replace(/\s+/gu,' ').trim().slice(0,48))
+    .filter(x=>x&&x.split(' ').length<=4))].slice(0,80);}
+const recentModes=new SceBoundedMap();
+const sceRecentCueHistory=new SceBoundedMap();
+const sceRecentAnchorHistory=new SceBoundedMap();
+const SCE_STRUCTURE_HISTORY=new SceBoundedMap();
+const SCE_STRUCTURE_ANCHORS=new SceBoundedMap();
+function generateCreativeRoll(preview=false){return JSON.stringify(sceLayeredRoll(sceContext(),preview));}
+function sceLayeredRoll(context=sceContext(),preview=false,structure=null){
+    const s=context?._sceSettings||sceSettings(context),index=context?._sceIndex||sceWordIndex(context),key=getChatKey(context);
+    const old=sceRecentCueHistory.get(key)||[],candidates=Object.entries(SCE_CATEGORIES)
+        .filter(([id])=>s.categoryWeights[id]>0).map(([id,cat])=>({value:id,
+            weight:s.categoryWeights[id]*(1+s.contextGravity/100*.7*Math.min(4,cat.triggers.filter(x=>index.recent.has(x)).length))}));
+    const target=1+Array.from({length:s.maxLayers-1},()=>sceChance(s.intensity)).filter(Boolean).length,layers=[];
+    while(layers.length<target&&candidates.length){
+        const id=sceWeighted(candidates),def=SCE_CATEGORIES[id];
+        // Architecture owns pacing when present. A pacing lens may refine but not contradict it.
+        const pool=id==='pacing'&&structure?['Vary moment-to-moment duration inside the selected arrangement.']:def.cues;
+        const recent=id==='direction'?(recentModes.get(key)||[]):old.filter(x=>x.startsWith(id+':')).map(x=>x.slice(id.length+1));
+        const instruction=s.antiRepeat?pickFresh(pool,recent):pick(pool);
+        layers.push({id,title:def.name,instruction});candidates.splice(candidates.findIndex(x=>x.value===id),1);
     }
-    lines.push('The Observer does not measure quality, appropriateness, character intent, or plot semantics.',
-        'Quotation spans are not a reliable semantic measure of dialogue.',
-        'A family/outcome association is observational, not evidence of causation.',
-        'No ideal dialogue ratio, ending type, paragraph shape or moral tone is assumed.');
-    return lines.join('\n');
+    const enabled=layers.length>0,previous=sceRecentAnchorHistory.get(key)||[];
+    const available=index.options.filter(x=>!s.antiRepeat||!previous.includes(x.value));
+    const anchor=enabled&&index.options.length&&sceChance(s.contextGravity)?sceWeighted(available.length?available:index.options):null;
+    const custom=scePersonalWords(s.customKeywords),sparks=[],free=layers.flatMap(x=>SCE_CATEGORIES[x.id].words);
+    const count=s.intensity<35?1:s.intensity<85?2:3;
+    for(let i=0;i<count;i++){
+        let word=null;
+        if(custom.length&&sceChance(s.keywordBoost))word=pickFresh(custom,sparks);
+        else if(enabled&&index.options.length&&sceChance(s.contextGravity)){
+            const linked=anchor&&index.nearby.get(anchor);
+            const pool=linked?.size?[...linked].map(([value,weight])=>({value,weight})):index.options;
+            word=sceWeighted(pool.filter(x=>x.value!==anchor&&!sparks.includes(x.value)));
+        }else if(enabled&&free.length)word=pickFresh(free,sparks);
+        if(word&&word!==anchor&&!sparks.includes(word))sparks.push(word);
+    }
+    // Disabled categories cannot leak legacy focus, pacing or wildcard directions.
+    const result={roll:randomInt(1000)+1,creative_mode:layers[0]?.instruction||'Keyword-only / no creative lenses',
+        anchor,word_sparks:sparks,layers,context_messages:index.analyzed};
+    if(!preview){
+        sceRecentCueHistory.set(key,[...layers.map(x=>x.id+':'+x.instruction),...old].slice(0,15));
+        const direction=layers.find(x=>x.id==='direction');
+        if(direction)recentModes.set(key,[direction.instruction,...(recentModes.get(key)||[])].slice(0,6));
+        if(anchor)sceRecentAnchorHistory.set(key,[anchor,...previous].slice(0,5));
+    }
+    return result;
 }
 
-
-/* Repeated closing-beat watch.
- * Objective scope: recognizable activity terms or repeated closing
- * word sequences, in completed assistant replies. Every activity family
- * is measured with the SAME rule. This is NOT semantic plot analysis.
- */
-const SCE_ENDING_WATCH_DEFAULTS = Object.freeze({
-    endingWatchEnabled: false,
-    endingWatchStrength: 85,
-    endingWatchWindow: 8,
-    endingWatchMinimum: 3,
-});
-const SCE_ENDING_NAMES_IGNORE = new Set(('The A An And But Then She He Her His They Them Their I We ' +
-    'You It This That Those These Here There What Who When Why How Where After Before At In On ' +
-    'As From To With By For While Meanwhile Suddenly Later Finally Eventually').toLocaleLowerCase().split(' '));
-const SCE_ENDING_STOP = new Set(('a an the another and or but so then after before to of in on at for with ' +
-    'from by into out up down over under as is are was were be been being its it her his their ' +
-    'she he they them we i me my you your us our this that these those one someone something ' +
-    'again very just still finally eventually later already while meanwhile suddenly').split(' '));
-const SCE_ENDING_ACTIONS = [
-    {id:'messaging',label:'text or message activity',
-        patterns:[
-            /\b(?:texted|texting|texts|messaged|messaging|dmed|dming)\b/giu,
-            /\b(?:send|sends|sent|sending|wrote|write|writes|writing|type|types|typed|typing|draft|drafted|forwarded)\b.{0,85}\b(?:text|message|dm|sms)\b/giu
-        ]},
-    {id:'calling',label:'calls or dialing',
-        patterns:[/\b(?:call(?:s|ed|ing)?|dial(?:s|ed|ing)?|voicemail)\b/giu]},
-    {id:'embracing',label:'hugging or embracing',
-        patterns:[/\b(?:hug(?:s|ged|ging)?|embrac(?:e|es|ed|ing)|cuddl(?:e|es|ed|ing))\b/giu]},
-    {id:'kissing',label:'kissing',patterns:[/\b(?:kiss(?:es|ed|ing)?|smooch(?:es|ed|ing)?)\b/giu]},
-    {id:'laughing',label:'laughing',patterns:[/\b(?:laugh(?:s|ed|ing)?|giggl(?:e|es|ed|ing)|chuckl(?:e|es|ed|ing))\b/giu]},
-    {id:'sighing',label:'sighing',patterns:[/\b(?:sigh(?:s|ed|ing)?|exhal(?:e|es|ed|ing))\b/giu]},
-    {id:'walking',label:'walking or leaving',patterns:[/\b(?:walk(?:s|ed|ing)?|leav(?:e|es|ing)|left|depart(?:s|ed|ing)?|exit(?:s|ed|ing)?)\b/giu]},
-    {id:'looking',label:'looking or glancing',patterns:[/\b(?:look(?:s|ed|ing)?|glanc(?:e|es|ed|ing)|star(?:e|es|ed|ing))\b/giu]},
-    {id:'asking',label:'asking questions',patterns:[/\b(?:ask(?:s|ed|ing)?|question(?:s|ed|ing)?|inquir(?:e|es|ed|ing))\b/giu]},
-    {id:'crying',label:'crying',patterns:[/\b(?:cry|cries|cried|crying|sob(?:s|bed|bing)?|weep(?:s|ing)?)\b/giu]},
-    {id:'drinking',label:'drinking',patterns:[/\b(?:drink(?:s|ing)?|drank|drunk|sip(?:s|ped|ping)?)\b/giu]},
-    {id:'eating',label:'eating',patterns:[/\b(?:eat(?:s|ing)?|ate|chew(?:s|ed|ing)?|munch(?:es|ed|ing)?)\b/giu]},
-    {id:'touching',label:'touching or grasping',patterns:[/\b(?:touch(?:es|ed|ing)?|grab(?:s|bed|bing)?|grasp(?:s|ed|ing)?)\b/giu]},
-    {id:'sleeping',label:'sleeping',patterns:[/\b(?:sleep(?:s|ing)?|slept|doz(?:e|es|ed|ing))\b/giu]},
-    {id:'smiling',label:'smiling or grinning',patterns:[/\b(?:smil(?:e|es|ed|ing)|grin(?:s|ned|ning)?)\b/giu]},
-    {id:'writing',label:'writing',patterns:[/\b(?:writ(?:e|es|ing)|wrote|scribbl(?:e|es|ed|ing)|jott?(?:ed|ing))\b/giu]},
-    {id:'waiting',label:'waiting',patterns:[/\b(?:wait(?:s|ed|ing)?|linger(?:s|ed|ing)?)\b/giu]},
+// Conservative activity recognition: evidence first, corrective instructions second.
+const SCE_ENDING_ACTIONS=[
+    {id:'messaging',label:'text or message activity',verb:'text|message|dm',
+        patterns:[/\b(?:sent|send|sends|sending|typed|type|types|typing|wrote|write|writes|writing|drafted|drafts)\b[^.!?;\n]{0,64}\b(?:text|message|dm|sms)\b/giu,/\b(?:texted|texts|texting|messaged|messages|messaging|dmed|dming)\b/giu]},
+    {id:'calling',label:'calls or dialing',verb:'call|dial',patterns:[/\b(?:called|calls|calling|dialed|dialled|dials|dialing|dialling)\b/giu]},
+    {id:'embracing',label:'hugging or embracing',verb:'hug|embrace|cuddle',patterns:[/\b(?:gave|gives)\b[^.!?;\n]{0,48}\ba hug\b/giu,/\b(?:hugs|hugged|hugging|embraces|embraced|embracing|cuddles|cuddled|cuddling)\b/giu]},
+    {id:'kissing',label:'kissing',verb:'kiss|smooch',patterns:[/\b(?:kisses|kissed|kissing|smooches|smooched|smooching)\b/giu]},
+    {id:'laughing',label:'laughing',verb:'laugh|giggle|chuckle',patterns:[/\b(?:laughs|laughed|laughing|giggles|giggled|giggling|chuckles|chuckled|chuckling)\b/giu]},
+    {id:'sighing',label:'sighing',verb:'sigh|exhale',patterns:[/\b(?:sighs|sighed|sighing|exhales|exhaled|exhaling)\b/giu]},
+    {id:'walking',label:'walking or leaving',verb:'walk|leave|depart|exit',patterns:[/\b(?:walks|walked|walking|leaves|leaving|left|departs|departed|departing|exits|exited|exiting)\b/giu]},
+    {id:'looking',label:'looking or glancing',verb:'look|glance|stare',patterns:[/\b(?:looks|looked|looking|glances|glanced|glancing|stares|stared|staring)\b/giu]},
+    {id:'asking',label:'asking questions',verb:'ask|inquire|question',patterns:[/\b(?:asks|asked|asking|inquires|inquired|inquiring|questions|questioned|questioning)\b/giu]},
+    {id:'crying',label:'crying',verb:'cry|sob|weep',patterns:[/\b(?:cries|cried|crying|sobs|sobbed|sobbing|weeps|wept|weeping)\b/giu]},
+    {id:'drinking',label:'drinking',verb:'drink|sip',patterns:[/\b(?:drinks|drank|drinking|sips|sipped|sipping)\b/giu]},
+    {id:'eating',label:'eating',verb:'eat|chew|munch',patterns:[/\b(?:eats|ate|eating|chews|chewed|chewing|munches|munched|munching)\b/giu]},
+    {id:'touching',label:'touching or grasping',verb:'touch|grab|grasp',patterns:[/\b(?:touches|touched|touching|grabs|grabbed|grabbing|grasps|grasped|grasping)\b/giu]},
+    {id:'sleeping',label:'sleeping',verb:'sleep|doze',patterns:[/\b(?:sleeps|slept|sleeping|dozes|dozed|dozing)\b/giu]},
+    {id:'smiling',label:'smiling or grinning',verb:'smile|grin',patterns:[/\b(?:smiles|smiled|smiling|grins|grinned|grinning)\b/giu]},
+    {id:'writing',label:'writing',verb:'write|scribble|jot',patterns:[/\b(?:writes|wrote|writing|scribbles|scribbled|scribbling|jots|jotted|jotting)\b/giu]},
+    {id:'waiting',label:'waiting',verb:'wait|linger',patterns:[/\b(?:waits|waited|waiting|lingers|lingered|lingering)\b/giu]},
 ];
-function sceEndingTail(text) {
-    const plain=sceStoryText(text).trim();
-    const paragraphs=plain.split(/\n\s*\n+/u).filter(Boolean);
-    return paragraphs.slice(-2).join(' ').slice(-720);
+const SCE_ENDING_STOP=new Set([...SCE_STOP,'someone','something','another','finally','eventually','meanwhile','suddenly']);
+function sceRegexEscape(text){return String(text).replace(/[.*+?^${}()|[\]\\]/gu,'\\$&');}
+function sceKnownActors(context=sceContext()){
+    const names=new Map();
+    const add=n=>{if(typeof n==='string'&&n.trim().length>=2&&n.length<=80)names.set(n.trim().toLowerCase(),n.trim());};
+    add(context?.name2);add(context?.name1);
+    const chars=Array.isArray(context?.characters)?context.characters:[];
+    // Character metadata is trusted for names only, never as a claim about actions.
+    add(chars[context?.characterId]?.name);
+    if(context?.groupId!=null)for(const c of chars)add(c?.name);
+    for(const m of (context?.chat||[]).slice(-40))if(m?.is_user===false&&!m.is_system)add(m.name);
+    return names;
 }
-function sceEndingNamedActor(tail,at) {
-    const preceding=tail.slice(Math.max(0,at-160),at);
-    const clause=preceding.split(/[.!?;\n]/u).pop() || '';
-    const names=part=>[...part.matchAll(/(?:^|[^\p{L}])(\p{Lu}\p{L}{1,}(?:['’-]\p{L}+)?)/gu)]
-        .map(match=>match[1].replace(/['’]s$/u,''))
-        .filter(name=>!SCE_ENDING_NAMES_IGNORE.has(name.toLocaleLowerCase()));
-    let candidates=names(clause);
-    // Resolve simple pronouns only when one uniquely named actor is nearby.
-    if(!candidates.length && /\b(?:she|he|they)\b/iu.test(clause))
-        candidates=names(preceding);
-    const unique=[...new Set(candidates.map(x=>x.toLocaleLowerCase()))];
-    return unique.length===1 ? candidates.find(x=>x.toLocaleLowerCase()===unique[0]) : null;
+function sceEndingTail(text){return sceStoryText(text).trim().split(/\n\s*\n+/u).slice(-2).join('\n\n').slice(-720);}
+function sceLocalClause(prefix){return prefix.split(/[.!?;\n]|,\s*(?:(?:and|but|then|while)\s+)?|\b(?:but|then)\b/iu).at(-1)||'';}
+function sceIsNegated(prefix){return /\b(?:not|never|no longer|without|refused to|avoided|stop|stops|stopped|avoid|don['’]t|doesn['’]t|didn['’]t|won['’]t|wouldn['’]t|couldn['’]t|can['’]t)\b/iu.test(sceLocalClause(prefix));}
+function sceIsHypothetical(prefix){return /\b(?:would|could|might|should|will|may|if|plans? to|wants? to|wanted to|about to|used to|going to)\b/iu.test(sceLocalClause(prefix));}
+function sceInsideQuote(text,at){
+    const prefix=text.slice(0,at);
+    return (prefix.match(/"/gu)||[]).length%2===1 || (prefix.lastIndexOf('“')>prefix.lastIndexOf('”'));
 }
-
-function sceEndingNormalizedToken(token) {
-    const t=String(token).toLocaleLowerCase();
-    if (/^(?:texts?|texted|texting|messages?|messaged|messaging|dms?|dming|dmed)$/u.test(t)) return 'message';
-    if (/^(?:sends?|sent|sending)$/u.test(t)) return 'send';
-    if (/^(?:writes?|wrote|writing|written)$/u.test(t)) return 'write';
-    if (/^(?:types?|typed|typing)$/u.test(t)) return 'type';
-    if (/^(?:looks?|looked|looking)$/u.test(t)) return 'look';
-    if (/^(?:laughs?|laughed|laughing)$/u.test(t)) return 'laugh';
-    if (/^(?:walks?|walked|walking)$/u.test(t)) return 'walk';
-    if (SCE_ENDING_STOP.has(t)) return t;
-    return t.replace(/(?:ing|ed|s)$/u, '') || t;
+function sceActorEvidence(tail,at,actors){
+    const prefix=tail.slice(Math.max(0,at-220),at).replace(/[*`]/gu,''),clause=sceLocalClause(prefix);
+    const modifiers='(?:\\s+(?:[\\p{L}]+ly|again|still|just|finally|quietly|carefully|slowly|quickly|is|was|has|had|then|already))*\\s*';
+    for(const [id,name] of actors){
+        const subject=new RegExp('(?:^|\\b(?:and|while)\\s+)'+sceRegexEscape(name)+modifiers+'$','iu');
+        if(subject.test(clause.trim()))return {actor:name,confidence:.96};
+    }
+    if(/(?:^|\b(?:and|while)\s+)(?:she|he|they)\s+(?:(?:\p{L}+ly|still|just|was|is|had|has)\s+)*$/iu.test(clause.trimEnd()+' ')){
+        const nearby=[...actors.values()].filter(n=>new RegExp('\\b'+sceRegexEscape(n)+'\\b','iu').test(prefix));
+        const possible=[...prefix.matchAll(/\b\p{Lu}[\p{L}'’-]+/gu)].map(x=>x[0]).filter(n=>!SCE_ENDING_STOP.has(n.toLowerCase())&&!/ly$/u.test(n)&&!['Then','Before','After','While'].includes(n));
+        if(nearby.length===1&&possible.every(n=>n.toLowerCase()===nearby[0].toLowerCase()))return {actor:nearby[0],confidence:.86};
+        return {actor:null,confidence:.58};
+    }
+    // A trailing participle can refer to a sole known subject in this sentence.
+    const sentence=prefix.split(/[.!?;\n]/u).at(-1)||'';
+    const nearby=[...actors.values()].filter(n=>new RegExp('\\b'+sceRegexEscape(n)+'\\b','iu').test(sentence));
+    if(nearby.length===1&&/ing\b/iu.test(tail.slice(at,at+18))&&
+        !/\b(?:read|reads|heard|saw|watched|mentioned|described|remembered|said|told)\b/iu.test(sentence))
+        return {actor:nearby[0],confidence:.8};
+    return {actor:null,confidence:.35};
 }
-function sceEndingMotifs(text) {
-    const tail=sceEndingTail(text);
-    if(!tail) return [];
-    const motifs = new Map();
-    for(const action of SCE_ENDING_ACTIONS) {
-        let latest = null;
-        for(const re of action.patterns) {
-            for(const match of tail.matchAll(re)) {
-                if (latest == null || match.index > latest.index) latest = match;
-            }
-        }
-        if (!latest || latest.index < tail.length - 350) continue;
-        // Independently count activity recurrence with and without a named actor.
-        motifs.set('act:'+action.id,{key:'act:'+action.id,
-            label:action.label, specific:false, kind:'activity', group:action.id});
-        const actor=sceEndingNamedActor(tail,latest.index);
-        if(actor) {
-            const key='actor:'+actor.toLocaleLowerCase()+':'+action.id;
-            motifs.set(key,{key,label:actor+' + '+action.label,
-                specific:true,kind:'activity',group:action.id});
+function sceEndingNamedActor(tail,at,actors=sceKnownActors()){return sceActorEvidence(tail,at,actors).actor;}
+function sceEndingNormalizedToken(token){return String(token).toLowerCase();}
+function sceEndingMotifs(text,actors=sceKnownActors()){
+    SCE_ANALYSIS_COUNTERS.motifBuilds++;
+    const tail=sceEndingTail(text),motifs=new Map();
+    for(const action of SCE_ENDING_ACTIONS){
+        for(const pattern of action.patterns)for(const m of tail.matchAll(pattern)){
+            if(m.index<tail.length-350)continue;
+            const prefix=tail.slice(0,m.index),evidence=sceActorEvidence(tail,m.index,actors);
+            if(sceIsNegated(prefix)||sceIsHypothetical(prefix))continue;
+            const quoted=sceInsideQuote(tail,m.index),confidence=quoted?Math.min(.4,evidence.confidence):evidence.confidence;
+            if(confidence<.5)continue; // Noun mentions and unknown sentence-initial adverbs abstain.
+            const generic={key:'act:'+action.id,label:action.label,kind:'activity',group:action.id,actor:null,specific:false,
+                confidence:Math.min(.65,confidence)};
+            const oldGeneric=motifs.get(generic.key);if(!oldGeneric||oldGeneric.confidence<generic.confidence)motifs.set(generic.key,generic);
+            if(evidence.actor){const key='actor:'+evidence.actor.toLowerCase()+':'+action.id;
+                const motif={key,label:evidence.actor+' + '+action.label,kind:'activity',group:action.id,
+                    actor:evidence.actor,specific:true,confidence};
+                if(!motifs.has(key)||motifs.get(key).confidence<confidence)motifs.set(key,motif);}
         }
     }
-    // Generic fallback: repeated exact 3-word sequences after simple, symmetric
-    // normalization. It can match actions outside our finite activity lexicon.
-    const normalized=sceFeedbackTextTokens(tail)
-        .filter(t=>!SCE_ENDING_STOP.has(t))
-        .map(sceEndingNormalizedToken).filter(t=>t.length>2 && !SCE_ENDING_STOP.has(t));
-    const ending=normalized.slice(-30);
-    for(let i=0;i+2<ending.length;i++) {
-        const phrase=ending.slice(i,i+3).join(' ');
-        const key='phrase:'+phrase;
-        motifs.set(key,{key,label:'repeated closing phrase ('+phrase+')',
-            specific:false,kind:'phrase',group:null});
+    // Literal sequences only. No stop-word removal or stemming creates fake phrases.
+    const words=sceFeedbackTextTokens(tail).slice(-30);
+    for(let i=0;i+3<words.length;i++){
+        const phrase=words.slice(i,i+4);
+        if(phrase.filter(w=>!SCE_ENDING_STOP.has(w)).length<3||phrase.some(w=>/^(?:never|not|don't|didn't)$/u.test(w)))continue;
+        const key='phrase:'+phrase.join(' ');
+        motifs.set(key,{key,label:'literal closing wording: '+phrase.join(' '),kind:'phrase',group:null,
+            actor:null,specific:false,confidence:.82});
     }
     return [...motifs.values()];
 }
-function sceEndingWatch(context,type='normal') {
-    const options=sceSettings(context);
-    if (!sceOn(options, 'endingWatchEnabled') || options.endingWatchStrength<=0) return null;
-    const samples=sceFeedbackReplyEntries(context,options.endingWatchWindow,type);
-    if(samples.length<4) return null;
-    const detected=new Map();
-    const recent = samples.slice(-3);
-    for(const sample of samples) {
-        const motifs=sceEndingMotifs(sample.message.mes);
-        const unique=new Set();
-        for(const motif of motifs) {
-            if(unique.has(motif.key))continue;
-            unique.add(motif.key);
-            const item=detected.get(motif.key)||{...motif,count:0,recent:0};
-            item.count++;
-            if(recent.some(x=>x.index===sample.index))item.recent++;
-            detected.set(motif.key,item);
+function sceCachedMotifs(message,s,actors){
+    const record=sceRecord(message,s),key=[...actors.keys()].sort().join('|');
+    if(!record.motifs.has(key)){
+        if(record.motifs.size>=2)record.motifs.clear();
+        record.motifs.set(key,sceEndingMotifs(record.clean,actors));
+    }
+    return record.motifs.get(key);
+}
+function sceRequestedActivities(text,actors,currentActor=null){
+    const result=[];
+    // Inspect the whole user turn, not the ending sampler. Semicolons isolate intent.
+    const clauses=sceStoryText(text).split(/[.!?;\n]+/u);
+    for(const clause of clauses){
+        const command=/\b(?:have|make|let|ask|tell|want|please|can you|could you|continue|keep)\b/iu.exec(clause);
+        const direct=/^\s*(?:please\s+)?(?:text|message|call|dial|hug|embrace|kiss|laugh|sigh|walk|leave|look|ask|cry|drink|sip|eat|touch|sleep|smile|write|wait|send)\b/iu.test(clause);
+        const addressed=[...actors.values()].find(n=>new RegExp('^\\s*'+sceRegexEscape(n)+'\\s*,','iu').test(clause));
+        if(!command&&!direct&&!addressed)continue;
+        let actor=addressed||null;
+        const named=/\b(?:have|make|let|ask|tell)\s+([\p{L}][\p{L}'’-]*)/iu.exec(clause);
+        if(named&&!/^(?:her|him|them|me|us|someone|the)$/iu.test(named[1]))actor=actors.get(named[1].toLowerCase())||named[1];
+        if(!actor){const present=[...actors.values()].filter(n=>new RegExp('\\b'+sceRegexEscape(n)+'\\b','iu').test(clause));
+            if(present.length===1)actor=present[0];else if(present.length>1)continue;}
+        if(!actor)actor=currentActor||'*';
+        for(const action of SCE_ENDING_ACTIONS){
+            const stems=action.verb.split('|').flatMap(v=>[v,v.replace(/e$/u,'')+'ing',v+'ing',v+'s',v+'es',v+'ed']);
+            const re=new RegExp('\\b(?:'+stems.map(sceRegexEscape).join('|')+(action.id==='messaging'?'|send\\s+(?:[\\p{L}]+\\s+){0,4}(?:text|message)':'')+')\\b','giu');
+            for(const m of clause.matchAll(re)){
+                if(command&&m.index<command.index)continue;
+                const before=clause.slice(0,m.index);
+                if(sceIsNegated(before))continue;
+                result.push({actor:actor.toLowerCase(),group:action.id});break;
+            }
         }
     }
-    // Identical threshold for every actor, activity and generic phrase.
-    const eligible=[...detected.values()].filter(x=>
-        x.count>=options.endingWatchMinimum && x.recent>=2);
-    if(!eligible.length)return null;
-    // Avoid suppressing the immediate activity explicitly requested by the
-    // most recent user turn; user authorship outweighs the repetition nudge.
-    const chat=Array.isArray(context?.chat)?context.chat:[];
-    const lastUser=[...chat].reverse().find(x=>x?.is_user===true && typeof x.mes==='string');
-    // Negated instructions such as "don't text" must not cancel the nudge.
-    const userText=sceStoryText(lastUser?.mes ?? '');
-    const negated=/\b(?:don't|do not|never|stop|avoid|not to)\b.{0,80}\b(?:text|message|call|hug|kiss|leave|laugh)\b/iu.test(userText);
-    const requested=lastUser&&!negated ?
-        new Set(sceEndingMotifs(lastUser.mes).map(x=>x.key)) : new Set();
-    const available=eligible.filter(x=>!requested.has(x.key) &&
-        !(x.kind==='activity' && requested.has('act:'+x.group)));
-    if(!available.length)return null;
-    // More frequent, more recent, actor-specific evidence outranks incidental
-    // common-token overlaps; no action family has an intrinsic preference.
-    available.sort((a,b)=>(b.count-a.count)||(b.recent-a.recent)||
-        (Number(b.specific)-Number(a.specific))||
-        ((a.kind==='phrase'?1:0)-(b.kind==='phrase'?1:0)));
-    const result=available[0];
-    return {...result,total:samples.length,strength:options.endingWatchStrength};
+    return result;
 }
-function sceFormatEndingWatch(watch) {
+function sceEndingObserve(context=sceContext(),type='normal'){
+    const s=context?._sceSettings||sceSettings(context),samples=sceFeedbackReplyEntries(context,s.endingWatchWindow,type);
+    const actors=sceKnownActors(context),detected=new Map(),recent=new Set(samples.slice(-3).map(x=>x.index));
+    for(const sample of samples)for(const motif of sceCachedMotifs(sample.message,s,actors)){
+        const item=detected.get(motif.key)||{...motif,count:0,recent:0,confidenceSum:0};
+        item.count++;if(recent.has(sample.index))item.recent++;item.confidenceSum+=motif.confidence;detected.set(motif.key,item);
+    }
+    return {samples,actors,motifs:[...detected.values()].map(x=>({...x,confidence:x.confidenceSum/x.count,total:samples.length}))};
+}
+function sceEndingWatch(context=sceContext(),type='normal'){
+    const s=context?._sceSettings||sceSettings(context);
+    if(!sceEffective(s,'endingWatchEnabled'))return null;
+    const report=sceEndingObserve(context,type);if(report.samples.length<4)return null;
+    const lastUser=(context?._sceEntries||sceSnapshot(context,type)).slice().reverse().find(x=>x.message?.is_user===true)?.message;
+    const requested=sceRequestedActivities(lastUser?.mes||'',report.actors,context?.name2);
+    const confidenceFloor=.97-.24*s.endingWatchStrength/100;
+    const minimum=Math.min(s.endingWatchWindow,s.endingWatchMinimum+(s.endingWatchStrength<40?1:0));
+    const available=report.motifs.filter(x=>x.count>=Math.max(minimum,x.kind==='phrase'?4:minimum)&&x.recent>=2&&
+        x.confidence>=confidenceFloor&&x.count/x.total>=.8-.45*s.endingWatchStrength/100&&
+        !(x.kind==='activity'&&requested.some(r=>r.group===x.group&&(r.actor==='*'||x.actor&&r.actor===x.actor.toLowerCase()))));
+    available.sort((a,b)=>Number(b.specific)-Number(a.specific)||b.confidence-a.confidence||b.count-a.count||b.recent-a.recent);
+    return available.length?{...available[0],strength:s.endingWatchStrength}:null;
+}
+
+function sceStructureSettings(context=sceContext()){return context?._sceSettings||sceSettings(context);}
+function sceStructureSignals(context=sceContext()){
+    const s=context?._sceSettings||sceSettings(context);
+    const text=(context?._sceEntries||sceSnapshot(context)).slice(-12).filter(x=>x.message&&!x.message.is_system&&typeof x.message.mes==='string')
+        .map(x=>sceRecord(x.message,s).clean.slice(-2500)).join('\n');
+    const count=re=>Math.min(5,(text.match(re)||[]).length);
+    return {dialogue:count(/["“”]|\b(?:said|asked|replied|whispered|shouted|spoke|told)\b/giu),
+        action:count(/\b(?:grabbed|lifted|opened|closed|walked|ran|moved|sat|stood|picked|dropped|carried|pushed|pulled|reached|turned|shoved|placed|held|touched|followed)\b/giu),
+        consequence:count(/\b(?:again|already|because|afterward|remembered|earlier|forgot|returned|result|therefore|owed)\b/giu),
+        social:count(/\b(?:friend|guest|neighbor|partner|family|apology|promise|jealous|trust|argument)\b/giu),
+        observation:count(/\b(?:noticed|watched|saw|heard|glanced|looked|observed|realized|stared|wondered)\b/giu)};
+}
+function sceStructureTargetCount(density){const base=1+Math.round(density*4/100),jitter=density>10&&density<90?randomInt(3)-1:0;return Math.min(5,Math.max(1,base+jitter));}
+function sceStructureBlueprint(id,count){
+    const f=SCE_STRUCTURE_FAMILIES[id],first=[],middle=[],last=[];
+    if(id==='sustained')return count>1?[pick(f.phases[0]),pick(f.phases[1])]:[pick(f.phases[0])];
+    if(id==='parallel'){
+        for(let i=0;i<count;i++)middle.push((i%2?'Thread B: ':'Thread A: ')+pick(f.phases[i%2]));
+        if(count>=4&&sceChance(30))middle[middle.length-1]=pick(f.phases[2]);return middle;
+    }
+    if(id==='mosaic'){for(let i=0;i<count;i++)middle.push(pick(f.phases[i%f.phases.length]));return middle;}
+    if(id==='pivot'){
+        const turn=1+randomInt(Math.max(1,count-1));
+        for(let i=0;i<count;i++)middle.push(pick(f.phases[i<turn?0:i===turn?1:2]));return middle;
+    }
+    first.push(pick(f.phases[0]));for(let i=0;i<count-2;i++)middle.push(pick(f.phases[1]));last.push(pick(f.phases[2]));
+    if(count===2)return id==='domino'?[first[0],last[0]]:[first[0],pick(f.phases[1])];
+    return [...first,...middle,...last];
+}
+function sceStructureAttention(count,influence){
+    const spread=Math.max(1,Math.ceil(influence/25)),w=Array.from({length:count},()=>1+randomInt(spread+1));
+    if(w.length>1&&w.every(x=>x===w[0])){const i=randomInt(count);w[i]=w[i]===1?2:w[i]-1;}return w;
+}
+function sceStructuralRoll(context=sceContext(),preview=false,type='normal'){
+    const s=sceStructureSettings(context);if(!sceEffective(s,'structureEnabled'))return null;
+    const key=getChatKey(context),history=SCE_STRUCTURE_HISTORY.get(key)||[],signals=sceStructureSignals(context);
+    const target=sceStructureTargetCount(s.beatDensity),influence=s.structureInfluence/100;
+    const pool=Object.entries(SCE_STRUCTURE_FAMILIES).filter(([id])=>s.structureWeights[id]>0).map(([id,f])=>{
+        const compatible=Object.entries(f.affinity).reduce((a,[signal,w])=>a+(signals[signal]||0)*w,0);
+        let weight=s.structureWeights[id]*(1+s.structureGrounding/100*Math.min(8,compatible)*.14)/(1+Math.max(0,f.min-target));
+        if(['mosaic','reverse','pivot','time','anticlimax'].includes(id))weight*=1+influence;
+        if(s.structureAntiRepeat){const position=history.slice(0,4).findIndex(x=>x.family===id);
+            if(position>=0)weight*=.18+.16*position;}
+        return {value:id,weight};
+    });
+    if(sceEffective(s,'feedbackBalancerEnabled')){
+        const factors=sceFeedbackFactors(context,sceFeedbackObserve(context,type));
+        for(const item of pool)item.weight*=factors.factors.get(item.value)?.factor||1;
+    }
+    const familyId=sceWeighted(pool);if(!familyId)return null;
+    const f=SCE_STRUCTURE_FAMILIES[familyId],count=Math.max(f.min,Math.min(f.max,target));
+    let beats,attention,transition,ending,signature;
+    for(let attempt=0;attempt<6;attempt++){
+        beats=sceStructureBlueprint(familyId,count);attention=sceStructureAttention(count,s.structureInfluence);
+        transition=pick(f.transitions);ending=pick(SCE_STRUCTURE_ENDINGS);
+        signature=[familyId,count,attention.join('-'),transition,ending,beats.join('|')].join(':');
+        if(!s.structureAntiRepeat||!history.some(x=>x.signature===signature))break;
+    }
+    const index=context?._sceIndex||sceWordIndex(context),prior=SCE_STRUCTURE_ANCHORS.get(key)||[];
+    const candidates=index.options.filter(x=>!s.structureAntiRepeat||!prior.includes(x.value)),anchors=[];
+    if(index.options.length&&sceChance(s.structureGrounding))anchors.push(sceWeighted(candidates.length?candidates:index.options));
+    const result={family:f.title,familyId,count,beats:beats.map((role,i)=>({role,attention:attention[i]})),attention,
+        transition,ending,anchors,signature,influence:s.structureInfluence,grounding:s.structureGrounding,
+        kind:s.structureInfluence>=80?'strong execution':s.structureInfluence>=50?'moderate execution':'gentle execution'};
+    if(!preview){SCE_STRUCTURE_HISTORY.set(key,[{family:familyId,signature},...history].slice(0,8));
+        if(anchors.length)SCE_STRUCTURE_ANCHORS.set(key,[...anchors,...prior].slice(0,10));}
+    return result;
+}
+const SCE_FEEDBACK_TRAITS=[['quotationBand','Quotation coverage band'],['paragraphShape','Paragraph-length arrangement'],['endingMark','Terminal punctuation']];
+const SCE_FEEDBACK_STATES=new SceBoundedMap();
+let sceModelEpoch=0;
+function sceFeedbackIdentity(context){
+    // Prefer stable host information. Model/profile-change events also reset state.
+    const model=context?.chatCompletionSettings?.model??context?.model??context?.onlineStatus??'';
+    return getChatKey(context)+'|'+(context?.characterId??'')+'|'+(context?.mainApi??'')+'|'+String(model);
+}
+function sceFeedbackState(context=sceContext()){
+    const key=sceFeedbackIdentity(context);let state=SCE_FEEDBACK_STATES.get(key);
+    if(!state){
+        const saved=context?.chatMetadata?.storyChaosEngineLearning;
+        const outcomes=saved?.schema===171&&saved.identity===key&&Array.isArray(saved.outcomes)?saved.outcomes.slice(-96).filter(sceValidOutcome):[];
+        state={pending:null,outcomes};SCE_FEEDBACK_STATES.set(key,state);
+    }
+    return state;
+}
+function sceValidOutcome(o){return sceObject(o)&&Number.isInteger(o.index)&&o.index>=0&&typeof o.signature==='string'&&
+    !!SCE_STRUCTURE_FAMILIES[o.family]&&sceObject(o.fingerprint)&&
+    SCE_FEEDBACK_TRAITS.every(([key])=>typeof o.fingerprint[key]==='string');}
+function sceFeedbackPersist(context,state){
+    if(!sceObject(context?.chatMetadata)||!context?.saveMetadataDebounced)return;
+    context.chatMetadata.storyChaosEngineLearning={schema:171,identity:sceFeedbackIdentity(context),outcomes:state.outcomes.slice(-96)};
+    context.saveMetadataDebounced();
+}
+function sceFeedbackReconcile(context=sceContext()){
+    const state=sceFeedbackState(context),chat=context?.chat||[];
+    state.outcomes=state.outcomes.filter(x=>{
+        const m=chat[x.index];return sceValidOutcome(x)&&sceFeedbackMessageEligible(m)&&
+            sceRecord(m,context?._sceSettings||sceSettings(context)).signature===x.signature&&(m.swipe_id??null)===(x.swipeId??null);
+    });
+    return state;
+}
+function sceFeedbackPending(context,familyId,type='normal'){
+    // Only a verified generation receipt may convert this into a learned outcome.
+    if(!familyId)return;sceFeedbackState(context).pending={family:familyId,type,runId:sceActiveRun?.id??null};
+}
+function sceFeedbackComplete(context,run,message,index){
+    if(!run.familyId||!run.observer||run.state!=='completed')return;
+    const state=sceFeedbackReconcile(context),fp=sceFeedbackCachedFingerprint(message);
+    state.outcomes=state.outcomes.filter(o=>o.index!==index);
+    state.outcomes.push({index,family:run.familyId,signature:fp.signature,swipeId:message.swipe_id??null,
+        fingerprint:{quotationBand:fp.quotationBand,paragraphShape:fp.paragraphShape,endingMark:fp.endingMark}});
+    state.outcomes=state.outcomes.slice(-96);state.pending=null;sceFeedbackPersist(context,state);
+}
+function sceFeedbackDominant(samples){
+    if(samples.length<4)return [];const result=[];
+    for(const [key,label] of SCE_FEEDBACK_TRAITS){const counts=new Map();
+        for(const x of samples){const v=x.fingerprint[key];counts.set(v,(counts.get(v)||0)+1);}
+        const [value,count]=[...counts].sort((a,b)=>b[1]-a[1])[0];
+        if(count>=Math.ceil(samples.length*.67))result.push({key,label,value,count,total:samples.length});}
+    return result;
+}
+function sceFeedbackObserve(context=sceContext(),type='normal'){
+    const s=context?._sceSettings||sceSettings(context),samples=sceFeedbackReplySamples(context,s.feedbackWindow,type);
+    const frequency=key=>{const out={};for(const x of samples){const v=x.fingerprint[key];out[v]=(out[v]||0)+1;}return out;};
+    const median=values=>{const a=[...values].sort((x,y)=>x-y);return a.length?(a[Math.floor((a.length-1)/2)]+a[Math.floor(a.length/2)])/2:0;};
+    const repeated=key=>{const m=new Map();for(const x of samples){const p=x.fingerprint[key];if(p)m.set(p,(m.get(p)||0)+1);}return [...m.values()].filter(n=>n>1).reduce((a,b)=>a+b,0);};
+    const grams=new Map();for(const x of samples)for(const p of x.fingerprint.fourGrams)grams.set(p,(grams.get(p)||0)+1);
+    return {available:samples.length,window:s.feedbackWindow,samples,medianWords:median(samples.map(x=>x.fingerprint.wordCount)),
+        medianParagraphs:median(samples.map(x=>x.fingerprint.paragraphs)),meanQuotationPercent:samples.length?
+            Math.round(100*samples.reduce((a,x)=>a+x.fingerprint.quotationShare,0)/samples.length):0,
+        quotationBands:frequency('quotationBand'),paragraphShapes:frequency('paragraphShape'),endings:frequency('endingMark'),
+        repeatedOpeningReplies:repeated('openingFour'),repeatedClosingReplies:repeated('closingFour'),
+        sharedFourTokenSequences:[...grams.values()].filter(n=>n>=2).length,dominant:sceFeedbackDominant(samples),
+        phraseSampling:samples.some(x=>x.fingerprint.phrasesSampled)};
+}
+function sceFeedbackFactors(context,report){
+    const s=context?._sceSettings||sceSettings(context),factors=new Map(),result={ready:false,matched:0,dominant:[],factors};
+    if(!sceEffective(s,'feedbackBalancerEnabled')||!report||report.available<4)return result;
+    const traits=report.dominant.filter(x=>s.balanceTraits[x.key]);if(!traits.length)return result;
+    const state=sceFeedbackState(context),chat=context?.chat||[];
+    const outcomes=state.outcomes.filter(o=>sceValidOutcome(o)&&sceFeedbackMessageEligible(chat[o.index])&&
+        sceRecord(chat[o.index],s).signature===o.signature&&(chat[o.index].swipe_id??null)===(o.swipeId??null));
+    const associations=[];
+    for(const id of Object.keys(SCE_STRUCTURE_FAMILIES)){
+        const matches=outcomes.filter(x=>x.family===id);if(matches.length<2||s.structureWeights[id]===0)continue;
+        const agreement=traits.reduce((sum,d)=>sum+matches.filter(x=>x.fingerprint[d.key]===d.value).length/matches.length,0)/traits.length;
+        associations.push({id,agreement,samples:matches.length});
+    }
+    // No relative evidence means no effective adjustment, including common punctuation.
+    if(associations.length<2||Math.max(...associations.map(x=>x.agreement))-Math.min(...associations.map(x=>x.agreement))<.05)return result;
+    const baseline=associations.reduce((sum,x)=>sum+x.agreement,0)/associations.length;
+    for(const x of associations){const confidence=Math.min(1,(x.samples-1)/4);
+        const factor=Math.max(.6,Math.min(1.4,1+s.feedbackStrength/100*.8*(baseline-x.agreement)*confidence));
+        factors.set(x.id,{factor,samples:x.samples});result.matched+=x.samples;}
+    result.ready=true;result.dominant=traits;return result;
+}
+function sceFeedbackReportText(context=sceContext(),type='normal'){
+    const s=sceSettings(context),r=sceFeedbackObserve(context,type),f=sceFeedbackFactors(context,r),w=sceEndingWatch(context,type);
+    const freq=obj=>Object.entries(obj).map(([k,n])=>k+': '+n).join(' · ')||'none';
+    const lines=['STRUCTURAL OBSERVER | measurements, not quality scores',
+        'Model replies analyzed: '+r.available+' / '+r.window,'Median words: '+r.medianWords,'Median paragraphs: '+r.medianParagraphs,
+        'Mean matched quotation coverage: '+r.meanQuotationPercent+'%','Quotation coverage bands: '+freq(r.quotationBands),
+        'Paragraph-length arrangements: '+freq(r.paragraphShapes),'Terminal punctuation: '+freq(r.endings),
+        'Replies sharing an exact 4-token opening: '+r.repeatedOpeningReplies,
+        'Replies sharing an exact 4-token closing: '+r.repeatedClosingReplies,
+        'Distinct 4-token sequences present in at least 2 replies: '+r.sharedFourTokenSequences,
+        'Phrase analysis: '+(r.phraseSampling?'bounded head/tail samples; totals above use complete cleaned text':'complete'),
+        '', 'BALANCER | successful, matched generations only',
+        'Observer effective: '+sceOn(s,'feedbackObserverEnabled'),'Balancer effective: '+sceEffective(s,'feedbackBalancerEnabled'),
+        'Evidence-based family adjustments: '+(f.ready?'relative differences observed':'none / insufficient contrasting evidence')];
+    for(const [id,x] of f.factors)lines.push(SCE_STRUCTURE_FAMILIES[id].title+': ×'+x.factor.toFixed(3)+' ('+x.samples+' matched replies)');
+    lines.push('','CLOSING-BEAT WATCH | lexical evidence, not semantic understanding',
+        'Effective: '+sceEffective(s,'endingWatchEnabled'),
+        'Corrective hint: '+(w?w.label+' ('+w.count+'/'+w.total+')':'none meeting evidence threshold'),
+        'A family/outcome association is observational, not evidence of causation.');
+    if(sceEffective(s,'endingWatchEnabled')){
+        const weak=sceEndingObserve(context,type).motifs.filter(x=>x.kind==='activity'&&x.count>=s.endingWatchMinimum&&x.confidence<.75);
+        lines.push('Low-confidence activity matches (not instructions): '+weak.length);
+    }
+    return lines.join('\n');
+}
+
+// One precedence-ordered packet. Preview and generation share this builder.
+function sceFormatPrompt(roll){
+    const lines=[];for(const x of roll?.layers||[])lines.push('Lens ['+x.title+']: '+x.instruction);
+    if(roll?.word_sparks?.length)lines.push('Optional words: '+roll.word_sparks.map(x=>'"'+x+'"').join(', '));
+    return lines.join('\n');
+}
+function sceFormatStructure(structure){
+    if(!structure)return '';
+    return ['Form: '+structure.family+' ('+structure.kind+').',
+        'Phases: '+structure.beats.map(x=>x.role).join(' → ')+'.',
+        'Attention: '+structure.attention.join(':')+'; not paragraph counts.'].join('\n');
+}
+function sceFormatEndingWatch(watch){
     if(!watch)return '';
-    const strength=watch.strength>=75?'clear':'gentle';
-    return [
-        '[ENDING-PATTERN WATCH: MEASURED REPETITION, NOT A STORY DIRECTIVE]',
-        'Observed pattern in recent closing passages: '+watch.label+
-            ' ('+watch.count+' of '+watch.total+' completed assistant replies).',
-        strength==='clear'
-            ? 'For the next response, do not default to this same closing behavior. Let existing motives and circumstances decide what actually happens and how it ends.'
-            : 'For the next response, consider an ending that does not repeat this activity by habit, if the established scene allows it.',
-        'Do not merely relocate the same repeated action to a different character or an earlier paragraph, and do not force a dramatic opposite.',
-        'If a separate structural ending suggestion conflicts with this measured repetition, prioritize avoiding the habitual repeat unless the story requires it.',
-        'If the user explicitly requests or established continuity requires it, let the action occur normally.',
-        'This is a lexical recurrence estimate, not a judgment of meaning, quality, morality, or character behavior.',
-        'Do not mention the analysis in the fiction.',
-        '[/ENDING-PATTERN WATCH]',
-    ].join('\n');
+    if(watch.kind==='phrase')return 'Repeated closing wording ('+watch.count+'/'+watch.total+'): "'+watch.label.replace(/^literal closing wording: /u,'')+'". Vary the wording without forcing new events.';
+    return 'Recurring close ('+watch.count+'/'+watch.total+'): '+watch.label+'. Avoid repeating or relocating this habit unless explicitly requested or required by continuity.';
+}
+function sceFormatCombined(roll,structure,watch=null,marker=''){
+    if(!(roll?.layers?.length||roll?.word_sparks?.length||structure||watch))return '';
+    const anchors=[...new Set([roll?.anchor,...(structure?.anchors||[])].filter(Boolean))].slice(0,1);
+    const lines=['[STORY CHAOS ENGINE'+(marker?' '+marker:'')+']',
+        'Preserve continuity, character knowledge, user agency and established formatting. These cues suggest possibilities, not facts.'];
+    if(watch)lines.push(sceFormatEndingWatch(watch));
+    if(structure)lines.push(sceFormatStructure(structure));
+    const creative=sceFormatPrompt(roll);if(creative)lines.push(creative);
+    if(anchors.length)lines.push('Existing context word: "'+anchors[0]+'".');
+    if(structure&&!watch)lines.push('Close: '+structure.ending);
+    lines.push('Use compatible cues in concrete events; skip conflicts. Output fiction only.','[/STORY CHAOS ENGINE]');
+    return lines.join('\n');
+}
+function sceBuildPacket(context=sceContext(),preview=false,type='normal',marker=''){
+    const s=structuredCloneSafe(sceSettings(context));
+    const snapshot={...context,_sceSettings:s,_sceEntries:sceSnapshot(context,type)};
+    snapshot._sceIndex=sceWordIndex(snapshot);
+    const structure=sceStructuralRoll(snapshot,true,type),creative=sceLayeredRoll(snapshot,true,structure);
+    const warning=sceEndingWatch(snapshot,type);
+    // Soft caps are applied to choices, never by truncating continuity or agency instructions.
+    let prompt=sceFormatCombined(creative,structure,warning,marker);
+    while(prompt.split(/\s+/u).length>250&&creative.layers.length>1){creative.layers.pop();prompt=sceFormatCombined(creative,structure,warning,marker);}
+    const packet={prompt,creative,structure,warning,settings:s,snapshot,words:prompt?prompt.trim().split(/\s+/u).length:0};
+    if(!preview)sceCommitPacketHistory(context,packet);
+    return packet;
+}
+function structuredCloneSafe(value){return typeof structuredClone==='function'?structuredClone(value):JSON.parse(JSON.stringify(value));}
+function sceCommitPacketHistory(context,p){
+    const key=getChatKey(context),old=sceRecentCueHistory.get(key)||[];
+    sceRecentCueHistory.set(key,[...p.creative.layers.map(x=>x.id+':'+x.instruction),...old].slice(0,15));
+    const d=p.creative.layers.find(x=>x.id==='direction');if(d)recentModes.set(key,[d.instruction,...(recentModes.get(key)||[])].slice(0,6));
+    if(p.creative.anchor)sceRecentAnchorHistory.set(key,[p.creative.anchor,...(sceRecentAnchorHistory.get(key)||[])].slice(0,5));
+    if(p.structure){const signature=p.structure.signature;
+        SCE_STRUCTURE_HISTORY.set(key,[{family:p.structure.familyId,signature},...(SCE_STRUCTURE_HISTORY.get(key)||[])].slice(0,8));
+        if(p.structure.anchors.length)SCE_STRUCTURE_ANCHORS.set(key,[...p.structure.anchors,...(SCE_STRUCTURE_ANCHORS.get(key)||[])].slice(0,10));}
 }
 
-function sceStructureUI(panel, config) {
-    if (typeof document === 'undefined') return;
-    const root = panel.querySelector('details > div');
-    if (!root) return;
-    const section = document.createElement('section');
-    section.className = 'sce_structure_section';
-    const weights = Object.entries(SCE_STRUCTURE_FAMILIES).map(([id, family]) =>
-        '<label class="sce_cat" for="sce_structure_' + id + '"><span>' + family.title + '</span>' +
-        '<select class="text_pole" id="sce_structure_' + id + '">' +
-        '<option value="0">Off</option><option value="1">Low</option>' +
-        '<option value="2">Normal</option><option value="3">High</option></select></label>'
-    ).join('');
-    section.innerHTML = [
-        '<details class="sce_group sce_structure_group">',
-        '<summary>🧬 Structural Entropy <small>independent beat architecture</small></summary>',
-        '<label class="sce_line" for="sce_structure_enable"><span>Enable structural rolls</span>',
-        '<input type="checkbox" id="sce_structure_enable"></label>',
-        '<small>Off by default when updating, so your existing creative results stay unchanged until you opt in.</small>',
-        '<div class="sce_line"><label for="sce_structure_influence">Structure influence</label>',
-        '<output id="sce_structure_influence_out"></output></div>',
-        '<input type="range" id="sce_structure_influence" min="0" max="100">',
-        '<div class="sce_line"><label for="sce_structure_density">Beat density</label>',
-        '<output id="sce_structure_density_out"></output></div>',
-        '<input type="range" id="sce_structure_density" min="0" max="100">',
-        '<div class="sce_line"><label for="sce_structure_grounding">Context grounding</label>',
-        '<output id="sce_structure_grounding_out"></output></div>',
-        '<input type="range" id="sce_structure_grounding" min="0" max="100">',
-        '<small>Grounding favors structural families fitting recent dialogue/actions, and attaches existing story words. It is lexical, not semantic analysis.</small>',
-        '<label class="sce_line" for="sce_structure_anti_repeat"><span>Avoid repeating recent structures</span>',
-        '<input type="checkbox" id="sce_structure_anti_repeat"></label>',
-        '<details class="sce_group"><summary>Structure family weights</summary>' + weights + '</details>',
-        '<div class="sce_actions"><button class="menu_button" type="button" id="sce_structure_preview">🎲 Preview structure</button></div>',
-        '<pre class="sce_preview" id="sce_structure_output" hidden></pre>',
-        '<small>Gemini still writes every actual beat. The extension never invents established facts or calls another model.</small>',
-        '</details>',
-    ].join('');
-    root.appendChild(section);
-    const el = id => section.querySelector('#sce_' + id);
-    const save = (key,value) => {
-        const current = sceSettings();
-        current[key] = value;
-        globalThis.SillyTavern?.getContext?.()?.saveSettingsDebounced?.();
-    };
-    el('structure_enable').checked = config.structureEnabled;
-    el('structure_enable').addEventListener('change', e => save('structureEnabled', e.target.checked));
-    el('structure_anti_repeat').checked = config.structureAntiRepeat;
-    el('structure_anti_repeat').addEventListener('change', e => save('structureAntiRepeat', e.target.checked));
-    for (const [id,key] of [
-        ['structure_influence','structureInfluence'],
-        ['structure_density','beatDensity'],
-        ['structure_grounding','structureGrounding'],
-    ]) {
-        const slider = el(id), output = el(id+'_out');
-        slider.value = config[key];
-        output.textContent = slider.value + '%';
-        slider.addEventListener('input', e => {
-            const n = Number(e.target.value);
-            output.textContent = n + '%';
-            save(key,n);
-        });
-    }
-    for (const [id] of Object.entries(SCE_STRUCTURE_FAMILIES)) {
-        const select = el('structure_'+id);
-        select.value = config.structureWeights[id];
-        select.addEventListener('change', e => {
-            sceSettings().structureWeights[id] = Number(e.target.value);
-            globalThis.SillyTavern?.getContext?.()?.saveSettingsDebounced?.();
-        });
-    }
-    el('structure_preview').addEventListener('click', () => {
-        const output = el('structure_output');
-        output.textContent = sceFormatStructure(sceStructuralRoll(globalThis.SillyTavern?.getContext?.(),true)) ||
-            'Structural Entropy is disabled or has no enabled structure families.';
-        output.hidden = false;
-    });
+// Host integration. Rendering is evidence of display, NOT evidence of success.
+const SCE_RUN_RECEIPTS=new SceBoundedMap();
+let sceLifecycleStart=null,sceActiveRun=null,sceRunCounter=0,sceRuntimeEnabled=true;
+let sceListeningSource=null,sceListeners=[],sceUiInitObserver=null,sceBootstrapTimer=null;
+let sceToolRegistered=false,sceFinishTimer=null;
+function sceClearPrompt(context=sceContext()) {context?.setExtensionPrompt?.(SCE_PROMPT_ID,'',1,0,false,1);}
+function sceSafeClear(context=sceContext()){try{sceClearPrompt(context);}catch(error){console.warn('[Story Chaos Engine] Unable to clear the host prompt.',error);}}
+function sceRunReceipt(context=sceContext()){return SCE_RUN_RECEIPTS.get(getChatKey(context))||null;}
+function sceSetReceipt(context,receipt){if(receipt)SCE_RUN_RECEIPTS.set(getChatKey(context),receipt);else SCE_RUN_RECEIPTS.delete(getChatKey(context));sceRenderReceipt(context);}
+function sceReceiptText(run){
+    if(!run)return 'No generation checked in this session.';
+    const guidance=run.payloadSeen?'guidance observed in assembled request':run.prompt?'guidance installed locally; outgoing request unverified':'no guidance selected';
+    const labels={prepared:'Preparing reply',rendered:'Reply rendered; checking completion',completed:'✓ Host completion verified',
+        stopped:'Stopped / partial',failed:'Generation failed / partial',unverified:'Completion unverified',
+        invalidated:'Receipt invalidated by an edit or swipe',disabled:'Engine disabled',legacy:'Legacy tool output prepared'};
+    let text=(labels[run.state]||'Status unavailable')+' · '+guidance;
+    if(run.state==='completed')text+=' · '+run.words+' words';
+    if(run.family)text+=' · '+run.family;
+    if(run.warningSent)text+=' · repetition nudge included';
+    if(run.repeatLabel)text+=' · recurring ending still observed';
+    if(run.reason)text+=' · '+run.reason;
+    return text;
 }
-
-
-function sceFeedbackUI(panel, config) {
-    if (typeof document === 'undefined') return;
-    const root = panel.querySelector('details > div');
-    if (!root) return;
-    const section = document.createElement('section');
-    section.className = 'sce_feedback_section';
-    section.innerHTML = [
-        '<details class="sce_group sce_feedback_group">',
-        '<summary>📊 Structural Feedback <small>neutral observer + optional balancer</small></summary>',
-        '<label class="sce_line" for="sce_feedback_observer"><span>Enable the Observer</span>',
-        '<input type="checkbox" id="sce_feedback_observer"></label>',
-        '<small>Read previous model responses and measure mechanical patterns only. No quality scores, moral classifications, or inferred plot semantics.</small>',
-        '<label class="sce_line" for="sce_feedback_balancer"><span>Enable adaptive Balancer</span>',
-        '<input type="checkbox" id="sce_feedback_balancer"></label>',
-        '<small>The Balancer needs Observer enabled, Structural Entropy enabled, at least 4 earlier responses, and enough matched structure/outcome evidence. Otherwise probabilities are unchanged.</small>',
-        '<div class="sce_line"><label for="sce_feedback_strength">Balancing strength</label>',
-        '<output id="sce_feedback_strength_out"></output></div>',
-        '<input type="range" id="sce_feedback_strength" min="0" max="100" step="1">',
-        '<label for="sce_feedback_window">Previous assistant replies to measure</label>',
-        '<select class="text_pole" id="sce_feedback_window">',
-        '<option value="4">Last 4 responses</option>',
-        '<option value="8">Last 8 responses</option>',
-        '<option value="16">Last 16 responses</option>',
-        '</select>',
-        '<details class="sce_group sce_ending_group">',
-        '<summary>🔁 Closing-Beat Watch <small>repeated actions and phrases</small></summary>',
-        '<label class="sce_line" for="sce_ending_enable"><span>Watch recurring closing actions</span>',
-        '<input type="checkbox" id="sce_ending_enable"></label>',
-        '<small>When repeated closing behavior is measured, add a short, action-neutral avoidance hint to the next normal prompt. No additional model calls.</small>',
-        '<div class="sce_line"><label for="sce_ending_strength">Ending-repeat avoidance strength</label>',
-        '<output id="sce_ending_strength_out"></output></div>',
-        '<input type="range" min="0" max="100" step="1" id="sce_ending_strength">',
-        '<label for="sce_ending_window">Previous assistant replies to check</label>',
-        '<select class="text_pole" id="sce_ending_window">',
-        '<option value="4">Last 4 responses</option>',
-        '<option value="8">Last 8 responses</option>',
-        '<option value="16">Last 16 responses</option>',
-        '</select>',
-        '<label for="sce_ending_minimum">Minimum repeated endings</label>',
-        '<select class="text_pole" id="sce_ending_minimum">',
-        '<option value="3">3 matching replies</option>',
-        '<option value="4">4 matching replies</option>',
-        '<option value="5">5 matching replies</option>',
-        '</select>',
-        '<small>Requires two matches among the most recent three replies. Recognizes only known action terms and literal recurring phrases. It cannot reliably understand equivalent plot beats.</small>',
-        '</details>',
-        '<div class="sce_actions">',
-        '<button class="menu_button" type="button" id="sce_feedback_analyze">📊 Analyze current replies</button>',
-        '<button class="menu_button" type="button" id="sce_feedback_reset">Reset learned associations</button>',
-        '</div>',
-        '<pre class="sce_preview" id="sce_feedback_report" hidden></pre>',
-        '<small>All measurements run locally. Analysis never calls an LLM or edits the chat. A reset clears only session-local family/outcome associations, not the chat history.</small>',
-        '</details>',
-    ].join('');
-    root.appendChild(section);
-    const el = id => section.querySelector('#sce_' + id);
-    const save = (key,value) => {
-        sceSettings()[key] = value;
-        globalThis.SillyTavern?.getContext?.()?.saveSettingsDebounced?.();
-    };
-    el('feedback_observer').checked = !!config.feedbackObserverEnabled;
-    el('feedback_observer').addEventListener('change', e =>
-        save('feedbackObserverEnabled', e.target.checked));
-    el('feedback_balancer').checked = !!config.feedbackBalancerEnabled;
-    el('feedback_balancer').addEventListener('change', e =>
-        save('feedbackBalancerEnabled', e.target.checked));
-    const strength = el('feedback_strength'), strengthOut = el('feedback_strength_out');
-    strength.value = config.feedbackStrength;
-    strengthOut.textContent = strength.value + '%';
-    strength.addEventListener('input', e => {
-        strengthOut.textContent = e.target.value + '%';
-        save('feedbackStrength', Number(e.target.value));
-    });
-    el('feedback_window').value = String(config.feedbackWindow);
-    el('feedback_window').addEventListener('change', e =>
-        save('feedbackWindow', Number(e.target.value)));
-    el('ending_enable').checked = !!config.endingWatchEnabled;
-    el('ending_enable').addEventListener('change', e =>
-        save('endingWatchEnabled', e.target.checked));
-    const endStrength = el('ending_strength'), endStrengthOut = el('ending_strength_out');
-    endStrength.value = config.endingWatchStrength;
-    endStrengthOut.textContent = endStrength.value + '%';
-    endStrength.addEventListener('input', e => {
-        endStrengthOut.textContent = e.target.value + '%';
-        save('endingWatchStrength', Number(e.target.value));
-    });
-    el('ending_window').value = String(config.endingWatchWindow);
-    el('ending_window').addEventListener('change', e =>
-        save('endingWatchWindow', Number(e.target.value)));
-    el('ending_minimum').value = String(config.endingWatchMinimum);
-    el('ending_minimum').addEventListener('change', e =>
-        save('endingWatchMinimum', Number(e.target.value)));
-    el('feedback_analyze').addEventListener('click', () => {
-        const report = el('feedback_report');
-        report.textContent = sceFeedbackReportText(globalThis.SillyTavern?.getContext?.());
-        report.hidden = false;
-    });
-    el('feedback_reset').addEventListener('click', () => {
-        const context = globalThis.SillyTavern?.getContext?.();
-        if (context) SCE_FEEDBACK_STATES.delete(getChatKey());
-        const report = el('feedback_report');
-        report.textContent = 'Session-local structural family/outcome associations were reset.\n' +
-            'Saved chat messages and measurement history were not changed.';
-        report.hidden = false;
-    });
+function sceRenderReceipt(context=sceContext()){
+    if(typeof document==='undefined')return;const el=document.getElementById('sce_run_receipt');if(!el)return;
+    const run=sceRunReceipt(context);el.textContent=sceReceiptText(run);el.dataset.state=run?.state||'idle';
 }
-
-function sceAdvancedUI(panel, config) {
-    const root = panel.querySelector('details > div');
-    if (!root) return;
-    const block = document.createElement('details');
-    block.className = 'sce_advanced sce_advanced_group';
-    block.innerHTML = [
-        '<summary>⚙️ Advanced controls <small>optional fine tuning</small></summary>',
-        '<label for="sce_mode">Operating mode</label>',
-        '<select id="sce_mode" class="text_pole">',
-        '<option value="automatic">Automatic prompt injection</option>',
-        '<option value="tool">Legacy function calling</option>',
-        '<option value="off">Off</option></select>',
-        '<label for="sce_role">Injection role</label>',
-        '<select id="sce_role" class="text_pole">',
-        '<option value="user">User (Gemini proxy friendly)</option>',
-        '<option value="system">System</option></select>',
-        '<div class="sce_line"><label for="sce_intensity">Creative randomness</label><output id="sce_intensity_out"></output></div>',
-        '<input type="range" id="sce_intensity" min="0" max="100" step="1">',
-        '<small>0 = one light suggestion; 100 = more independent layers, greater variety.</small>',
-        '<div class="sce_line"><label for="sce_layers">Maximum creative layers</label><output id="sce_layers_out"></output></div>',
-        '<input type="range" id="sce_layers" min="1" max="5" step="1">',
-        '<div class="sce_line"><label for="sce_gravity">Context gravity</label><output id="sce_gravity_out"></output></div>',
-        '<input type="range" id="sce_gravity" min="0" max="100" step="1">',
-        '<small>High = favor words from the current story and compatible categories. Low = wider, stranger associations.</small>',
-        '<label for="sce_scope">Context window</label>',
-        '<select id="sce_scope" class="text_pole">',
-        '<option value="full">Whole available chat (up to 300,000 characters)</option>',
-        '<option value="recent">Recent 16 story messages</option></select>',
-        '<details class="sce_group" open><summary>Creative categories & weights</summary>',
-        ...Object.entries(SCE_CATEGORIES).map(([id, cat]) =>
-            '<label for="sce_cat_' + id + '" class="sce_cat"><span>' + cat.name + '</span>' +
-            '<select class="text_pole" id="sce_cat_' + id + '">' +
-            '<option value="0">Off</option><option value="1">Low</option>' +
-            '<option value="2">Normal</option><option value="3">High</option>' +
-            '</select></label>'),
-        '</details>',
-        '<label class="sce_line" for="sce_antirepeat"><span>Avoid recently used cues and anchors</span>',
-        '<input type="checkbox" id="sce_antirepeat"></label>',
-        '<button type="button" class="menu_button" id="sce_preview">🎲 Preview a roll</button>',
-        '<pre class="sce_preview" id="sce_preview_text" hidden></pre>',
-        '<small>Preview is local: no API request, no chat history edits, and no consumption of anti-repeat history.</small>'
-    ].join('');
-    root.appendChild(block);
-    const el = id => block.querySelector('#sce_' + id);
-    function store(name, value) {
-        sceSettings()[name] = value;
-        globalThis.SillyTavern?.getContext?.()?.saveSettingsDebounced?.();
+function sceReleaseRunSignal(run){if(!run)return;if(run.signal&&run.abortListener)run.signal.removeEventListener?.('abort',run.abortListener);run.signal=null;run.abortListener=null;run.processor=null;run.previousProcessor=null;}
+function sceMarkUnsuccessful(run,state,reason){
+    if(!run)return;run.state=state;run.reason=reason||'';
+    if(run.toast&&typeof globalThis.toastr?.clear==='function')globalThis.toastr.clear(run.toast);run.toast=null;
+    const ctx=sceContext();
+    if(ctx&&getChatKey(ctx)===run.key){
+        const m=ctx.chat?.[run.targetIndex];
+        if(m?.is_user===false&&(run.targetMatched||sceCurrentRunMessage(ctx,run,run.targetIndex)))SCE_MESSAGE_STATUS.set(m,{raw:m.mes,state});
+        const learned=sceFeedbackState(ctx);
+        learned.pending=null;
+        if(run.messageIndex!=null){learned.outcomes=learned.outcomes.filter(o=>o.index!==run.messageIndex);sceFeedbackPersist(ctx,learned);}
+        sceSetReceipt(ctx,run);
     }
-    const sliders = [
-        ['intensity','intensity','%'],
-        ['layers','maxLayers',''],
-        ['gravity','contextGravity','%'],
-    ];
-    for (const [id, property, suffix] of sliders) {
-        const slider = el(id);
-        const output = el(id + '_out');
-        slider.value = config[property];
-        output.textContent = slider.value + suffix;
-        slider.addEventListener('input', e => {
-            output.textContent = e.target.value + suffix;
-            store(property, Number(e.target.value));
-        });
-    }
-    el('scope').value = config.contextScope;
-    el('scope').addEventListener('change', e => store('contextScope', e.target.value));
-    for (const [id] of Object.entries(SCE_CATEGORIES)) {
-        const input = el('cat_' + id);
-        input.value = config.categoryWeights[id];
-        input.addEventListener('change', e => {
-            sceSettings().categoryWeights[id] = Number(e.target.value);
-            globalThis.SillyTavern?.getContext?.()?.saveSettingsDebounced?.();
-        });
-    }
-    el('antirepeat').checked = config.antiRepeat;
-    el('antirepeat').addEventListener('change', e => store('antiRepeat', e.target.checked));
-    el('preview').addEventListener('click', () => {
-        const output = el('preview_text');
-        const current = globalThis.SillyTavern?.getContext?.();
-        output.textContent = sceFormatCombined(
-            sceLayeredRoll(current, true),
-            sceOn(sceSettings(current),'structureEnabled') ? sceStructuralRoll(current, true) : null
-        );
-        output.hidden = false;
-    });
 }
-
-let sceUiInitObserver = null;
-function sceWaitForSettingsPanel() {
-    if (sceUiInitObserver || typeof globalThis.MutationObserver !== 'function' ||
-        typeof document==='undefined' || !document.body) return;
-    sceUiInitObserver=new globalThis.MutationObserver(()=>{
-        if (!document.getElementById('extensions_settings')) return;
-        const observer=sceUiInitObserver;
-        sceUiInitObserver=null;
-        observer?.disconnect();
-        sceInit();
-    });
-    sceUiInitObserver.observe(document.body,{childList:true,subtree:true});
-}
-function sceInit() {
-    const context = globalThis.SillyTavern?.getContext?.();
-    if (!context) return;
-    sceSubscribeEvents(context);
-    const settings = sceSettings(context);
-    sceSyncTool(context);
-    const root = typeof document !== 'undefined' && document.getElementById('extensions_settings');
-    if (!root) { sceWaitForSettingsPanel(); return; }
-    if (document.getElementById('sce_settings')) return;
-    const panel = document.createElement('div');
-    panel.id = 'sce_settings';
-    panel.innerHTML = [
-        '<details class="sce_main_group" open>',
-        '<summary>🎲 Story Chaos Engine · v1.7.0</summary>',
-        '<div class="sce_main_body">',
-        '<label class="sce_line" for="sce_autopilot"><span><strong>Autopilot</strong> · automatic variation and repetition correction</span>',
-        '<input type="checkbox" id="sce_autopilot"></label>',
-        '<small>Enable once, then keep writing. Your existing custom weights are preserved.</small>',
-        '<label for="sce_preset">Creative behavior</label>',
-        '<select id="sce_preset" class="text_pole">',
-        '<option value="subtle">Subtle</option>',
-        '<option value="balanced">Balanced</option>',
-        '<option value="wild">Wild</option></select>',
-        '<label for="sce_keywords">Your optional keywords</label>',
-        '<textarea id="sce_keywords" class="text_pole" rows="3" maxlength="2400" placeholder="coffee, velvet, awkward pause"></textarea>',
-        '<div class="sce_line"><label for="sce_keywordboost">Keyword influence</label>',
-        '<output id="sce_keywordboost_out"></output></div>',
-        '<input type="range" id="sce_keywordboost" min="0" max="100" step="1">',
-        '<label class="sce_line" for="sce_notify"><span>Brief completion notifications</span>',
-        '<input type="checkbox" id="sce_notify"></label>',
-        '<small>After a reply finishes, confirm the guidance was delivered. This does not claim the model obeyed it.</small>',
-        '<div class="sce_run_receipt" id="sce_run_receipt" role="status" aria-live="polite">No generated reply checked this session.</div>',
-        '<small id="sce_last_roll">No rolls this session.</small>',
-        '</div></details>',
-    ].join('');
-    root.appendChild(panel);
-    // Advanced controls must exist before querying the mode and role fields.
-    sceAdvancedUI(panel, settings);
-    const modeSelect = panel.querySelector('#sce_mode');
-    const roleSelect = panel.querySelector('#sce_role');
-    modeSelect.value = settings.mode;
-    roleSelect.value = settings.role;
-    const autopilot=panel.querySelector('#sce_autopilot');
-    const preset=panel.querySelector('#sce_preset');
-    const keywords=panel.querySelector('#sce_keywords');
-    const keywordBoost=panel.querySelector('#sce_keywordboost');
-    const keywordOut=panel.querySelector('#sce_keywordboost_out');
-    const notify=panel.querySelector('#sce_notify');
-    autopilot.checked=settings.autopilotEnabled;
-    autopilot.addEventListener('change',e=>{
-        settings.autopilotEnabled=e.target.checked;
-        if (e.target.checked && settings.mode!=='automatic') {
-            settings.mode='automatic';
-            modeSelect.value=settings.mode;
-            sceSyncTool(context);
-            sceClearPrompt(context);
+function sceGenerationStarted(type,options={},dryRun=false){
+    if(dryRun)return;
+    const context=sceContext();if(!context)return;
+    const kind=type||'normal';
+    if(!['normal','swipe','regenerate'].includes(kind)){
+        // A quiet/continuation request has its own lifecycle. Its stop/end events
+        // must never revoke or certify a prior normal response.
+        if(sceActiveRun){
+            if(!['completed','failed','stopped','invalidated'].includes(sceActiveRun.state))
+                sceMarkUnsuccessful(sceActiveRun,'unverified','Overlapping unsupported generation');
+            sceReleaseRunSignal(sceActiveRun);
         }
-        context.saveSettingsDebounced?.();
-    });
-    preset.value=settings.autopilotPreset;
-    preset.addEventListener('change',e=>{
-        settings.autopilotPreset=e.target.value;
-        const values={
-            subtle:{intensity:35,maxLayers:2,structureInfluence:55,beatDensity:40,contextGravity:80},
-            balanced:{intensity:65,maxLayers:3,structureInfluence:82,beatDensity:60,contextGravity:75},
-            wild:{intensity:90,maxLayers:4,structureInfluence:95,beatDensity:80,contextGravity:50},
-        }[e.target.value];
-        if (!values) return;
-        Object.assign(settings,values);
-        for(const [id,key] of [
-            ['intensity','intensity'],['layers','maxLayers'],['gravity','contextGravity'],
-            ['structure_influence','structureInfluence'],['structure_density','beatDensity'],
-        ]) {
-            const el=panel.querySelector('#sce_'+id);
-            if(el) el.value=String(settings[key]);
-            const out=panel.querySelector('#sce_'+id+'_out');
-            if(out) out.textContent=String(settings[key])+(id==='layers'?'':'%');
-        }
-        context.saveSettingsDebounced?.();
-    });
-    keywords.value=settings.customKeywords;
-    keywords.addEventListener('input',e=>{
-        settings.customKeywords=e.target.value.slice(0,2400);
-        context.saveSettingsDebounced?.();
-    });
-    keywordBoost.value=settings.keywordBoost;
-    keywordOut.textContent=settings.keywordBoost+'%';
-    keywordBoost.addEventListener('input',e=>{
-        settings.keywordBoost=Number(e.target.value);
-        keywordOut.textContent=e.target.value+'%';
-        context.saveSettingsDebounced?.();
-    });
-    notify.checked=settings.notifyAfterReply;
-    notify.addEventListener('change',e=>{
-        settings.notifyAfterReply=e.target.checked;
-        context.saveSettingsDebounced?.();
-    });
-    modeSelect.addEventListener('change', () => {
-        settings.mode = modeSelect.value;
-        if (settings.mode!=='automatic') {
-            settings.autopilotEnabled=false;
-            autopilot.checked=false;
-        }
-        sceClearPrompt(context);
-        sceSyncTool(context);
-        context.saveSettingsDebounced?.();
-    });
-    roleSelect.addEventListener('change', () => {
-        settings.role = roleSelect.value;
-        context.saveSettingsDebounced?.();
-    });
-    sceStructureUI(panel, settings);
-    sceFeedbackUI(panel, settings);
+        sceActiveRun=null;sceLifecycleStart=null;
+        return;
+    }
+    if(sceActiveRun){
+        sceReleaseRunSignal(sceActiveRun);
+        if(!['completed','failed','stopped','invalidated','disabled'].includes(sceActiveRun.state))
+            sceMarkUnsuccessful(sceActiveRun,'unverified','Superseded by a new generation');
+    }
+    sceActiveRun=null;
+    const last=context.chat?.at(-1);
+    sceLifecycleStart={key:getChatKey(context),type:kind,started:Date.now(),signal:options?.signal||null,
+        replacement:['swipe','regenerate'].includes(kind)&&last?.is_user===false?last:null};
+}
+function scePayloadText(data){
+    const strings=[];
+    const content=value=>{if(typeof value==='string')strings.push(value);else if(Array.isArray(value))
+        for(const block of value)if(block?.type==='text'&&typeof block.text==='string')strings.push(block.text);};
+    if(typeof data==='string')content(data);
+    else if(Array.isArray(data)){for(const item of data)content(item?.content);}
+    else if(sceObject(data)){
+        for(const list of [data.messages,data.chat,Array.isArray(data.prompt)?data.prompt:null])if(Array.isArray(list))for(const m of list)content(m?.content);
+        if(typeof data.prompt==='string')content(data.prompt);if(typeof data.input==='string')content(data.input);
+    }
+    return strings;
+}
+function sceObservePayload(data,dryRun=false,priority=1){
+    const run=sceActiveRun,context=sceContext();
+    if(!run||!context||getChatKey(context)!==run.key||dryRun||data?.dryRun||['stopped','failed','disabled','invalidated'].includes(run.state))return;
+    const texts=scePayloadText(data);if(!texts.length)return;
+    const normalize=t=>t.replace(/\s+/gu,' ').trim();
+    const found=texts.some(t=>normalize(t).includes(normalize(run.prompt))&&t.includes(run.id));
+    if(priority>=run.payloadPriority){run.payloadSeen=!!run.prompt&&found;run.payloadPriority=priority;}
+    if(typeof data?.stream==='boolean')run.streaming=data.stream;
+    const processor=context.streamingProcessor;
+    if(processor&&processor!==run.previousProcessor){run.processor=processor;run.streaming=true;}
     sceRenderReceipt(context);
-    console.info('[Story Chaos Engine] v1.7.0 initialized:', settings.mode);
+}
+function sceCurrentRunMessage(context,run,id){
+    if(id!==run.targetIndex)return null;const message=context.chat?.[id];
+    if(!message||message.is_user!==false||message.is_system||typeof message.mes!=='string'||!message.mes.trim()||message.mes.trim()==='...'
+        ||message.extra?.tool_calls||message.extra?.tool_result||message.extra?.type)return null;
+    // A swipe must differ in text OR carry genuinely newer generation metadata.
+    // Merely moving the swipe picker or rendering an old slot is not new evidence.
+    if(run.before){
+        const newer=Number(new Date(message.gen_started))>run.before.started&&Number(new Date(message.gen_finished))>=run.started;
+        if(message.mes===run.before.raw&&!newer)return null;
+        if((message.swipe_id??null)!==run.before.swipe&&Number(new Date(message.gen_finished))<run.started)return null;
+    }
+    return message;
+}
+function sceCaptureProcessor(context,run){
+    const p=context.streamingProcessor;
+    if(p&&p!==run.previousProcessor&&(p.messageId===run.targetIndex||p.messageId===-1||p.messageId==null)){
+        run.processor=p;run.streaming=true;
+    }
+    return run.processor;
+}
+function sceReceive(messageId,type){
+    const context=sceContext(),run=sceActiveRun,id=Number(messageId);
+    if(!context||!run||getChatKey(context)!==run.key||['first_message','impersonate','quiet','continue'].includes(type))return;
+    const message=sceCurrentRunMessage(context,run,id);if(!message)return;
+    run.received=true;run.targetMatched=true;run.message=message;run.messageIndex=id;sceCaptureProcessor(context,run);
+    sceScheduleFinish(run);
+}
+function sceReplyRendered(messageId,type){
+    const context=sceContext(),run=sceActiveRun,id=Number(messageId);
+    if(!context||!run||getChatKey(context)!==run.key||['first_message','impersonate','quiet','continue'].includes(type))return;
+    if(['stopped','failed','disabled','invalidated'].includes(run.state))return;
+    const message=sceCurrentRunMessage(context,run,id);if(!message)return;
+    run.rendered=true;run.targetMatched=true;run.message=message;run.messageIndex=id;
+    const p=sceCaptureProcessor(context,run);
+    if(run.signal?.aborted||p?.abortController?.signal?.aborted||p?.isStopped){sceMarkUnsuccessful(run,'failed','Stream or request was aborted');return;}
+    if(['prepared','unverified'].includes(run.state))run.state='rendered';
+    sceRenderReceipt(context);sceScheduleFinish(run);
+}
+function sceGenerationEnded(){
+    const context=sceContext(),run=sceActiveRun;if(!context||!run||getChatKey(context)!==run.key)return;
+    run.ended=true;sceCaptureProcessor(context,run);sceScheduleFinish(run);
+}
+function sceGenerationStopped(){
+    if(!sceActiveRun)return;sceMarkUnsuccessful(sceActiveRun,'stopped','Host stop event');
+    if(sceFinishTimer){clearTimeout(sceFinishTimer);sceFinishTimer=null;}
+}
+function sceScheduleFinish(run){
+    if(sceFinishTimer)clearTimeout(sceFinishTimer);
+    if(typeof setTimeout==='function')sceFinishTimer=setTimeout(()=>{sceFinishTimer=null;sceGuard(sceFinalizeRun)(run);},0);
+    else sceGuard(sceFinalizeRun)(run);
+}
+function sceFinalizeRun(run=sceActiveRun){
+    const context=sceContext();
+    if(!run||run!==sceActiveRun||!context||getChatKey(context)!==run.key)return;
+    if(['failed','stopped','disabled','invalidated'].includes(run.state))return;
+    const processor=sceCaptureProcessor(context,run);
+    if(run.signal?.aborted||processor?.abortController?.signal?.aborted||processor?.isStopped){sceMarkUnsuccessful(run,'failed','Stream or request was aborted');return;}
+    if(['failed','stopped','disabled','invalidated'].includes(run.state))return;
+    const message=sceCurrentRunMessage(context,run,run.targetIndex);
+    const streamed=processor?.messageId===run.targetIndex&&processor?.isFinished===true&&processor?.isStopped===false&&processor?.abortController?.signal?.aborted===false&&
+        (processor.timeStarted==null||Number(new Date(processor.timeStarted))===Number(new Date(message?.gen_started)));
+    const started=Number(new Date(message?.gen_started)),finished=Number(new Date(message?.gen_finished));
+    const nonStream=run.streaming===false&&run.payloadSeen&&Number.isFinite(started)&&Number.isFinite(finished)&&
+        finished>=started&&finished>=run.started&&(!run.before||started>run.before.started);
+    const verified=message&&run.received&&run.rendered&&run.ended&&(streamed||nonStream);
+    if(!verified){
+        if(run.ended){run.state='unverified';run.reason=message?'Host completion evidence incomplete':'No matching completed response';sceSetReceipt(context,run);}
+        return;
+    }
+    if(run.state==='completed')return;
+    run.state='completed';run.reason='';run.completionRaw=message.mes;run.completionSwipe=message.swipe_id??null;
+    SCE_MESSAGE_STATUS.set(message,{raw:message.mes,state:'completed'});
+    const fp=sceFeedbackCachedFingerprint(message,run.settings);run.words=fp.wordCount;
+    const warning=sceEndingWatch(context);run.repeatLabel=warning?.label||null;
+    sceFeedbackComplete(context,run,message,run.targetIndex);sceSetReceipt(context,run);
+    if(run.packet&&!run.historyCommitted){sceCommitPacketHistory(context,run.packet);run.historyCommitted=true;}
+    if(run.settings.notifyAfterReply&&typeof globalThis.toastr?.info==='function'){
+        run.toast=globalThis.toastr.info('🎲 Host completion verified · '+run.words+' words'+(run.payloadSeen?' · guidance seen in request':' · outgoing guidance unverified'),
+            'Story Chaos Engine',{timeOut:2400,extendedTimeOut:800,preventDuplicates:true,progressBar:false});
+    }
+}
+function sceHistoryChanged(){
+    const ctx=sceContext();if(!ctx)return;const run=sceRunReceipt(ctx);
+    if(run?.state==='completed'){
+        const m=ctx.chat?.[run.targetIndex];
+        if(!m||m.mes!==run.completionRaw||(m.swipe_id??null)!==run.completionSwipe)sceMarkUnsuccessful(run,'invalidated','Changed response is not the verified generation');
+    }
+    sceFeedbackReconcile(ctx);sceRefreshUI();
+}
+function sceChatChanged(){
+    if(sceActiveRun){
+        const run=sceActiveRun;sceReleaseRunSignal(run);
+        if(!['completed','stopped','failed','invalidated'].includes(run.state)){run.state='unverified';run.reason='Chat changed during generation';}
+        sceActiveRun=null;
+    }
+    sceLifecycleStart=null;sceSafeClear();sceRefreshUI();
+}
+function sceModelChanged(){
+    sceModelEpoch++;SCE_FEEDBACK_STATES.clear();
+    const context=sceContext();
+    if(context?.chatMetadata?.storyChaosEngineLearning){delete context.chatMetadata.storyChaosEngineLearning;context.saveMetadataDebounced?.();}
+    sceChatChanged();
+}
+function sceGuard(fn){return(...args)=>{try{return fn(...args);}catch(error){console.warn('[Story Chaos Engine] Non-blocking event fallback.',error);}};}
+function sceSubscribeEvents(context=sceContext()){
+    const source=context?.eventSource,types=context?.eventTypes;
+    if(!source?.on||!types||source===sceListeningSource)return;
+    sceUnsubscribeEvents();sceListeningSource=source;
+    const handlers={GENERATION_STARTED:sceGenerationStarted,GENERATION_STOPPED:sceGenerationStopped,GENERATION_ENDED:sceGenerationEnded,
+        MESSAGE_RECEIVED:sceReceive,CHARACTER_MESSAGE_RENDERED:sceReplyRendered,CHAT_CHANGED:sceChatChanged,
+        MESSAGE_EDITED:sceHistoryChanged,MESSAGE_UPDATED:sceHistoryChanged,MESSAGE_DELETED:sceHistoryChanged,
+        MESSAGE_SWIPED:sceHistoryChanged,MESSAGE_SWIPE_DELETED:sceHistoryChanged,
+        CHATCOMPLETION_MODEL_CHANGED:sceModelChanged,CHATCOMPLETION_SOURCE_CHANGED:sceModelChanged,
+        MAIN_API_CHANGED:sceModelChanged,CONNECTION_PROFILE_LOADED:sceModelChanged,
+        CHAT_COMPLETION_PROMPT_READY:(data)=>sceObservePayload(data,data?.dryRun,1),
+        GENERATE_AFTER_DATA:(data,dry)=>sceObservePayload(data,dry,2),
+        CHAT_COMPLETION_SETTINGS_READY:(data)=>sceObservePayload(data,false,3),
+        TEXT_COMPLETION_SETTINGS_READY:(data)=>sceObservePayload(data,false,3),
+        APP_READY:sceInit,EXTENSION_SETTINGS_LOADED:sceRefreshUI};
+    for(const [name,fn] of Object.entries(handlers))if(types[name]){const guarded=sceGuard(fn);source.on(types[name],guarded);sceListeners.push([types[name],guarded]);}
+}
+function sceUnsubscribeEvents(){
+    for(const [event,fn] of sceListeners){if(sceListeningSource?.removeListener)sceListeningSource.removeListener(event,fn);else sceListeningSource?.off?.(event,fn);}
+    sceListeners=[];sceListeningSource=null;
+}
+globalThis.storyChaosEngineInterceptor=async function(_chat,_contextSize,_abort,type){
+    const context=sceContext();if(!context?.setExtensionPrompt)return;
+    try{
+        const settings=sceSettings(context),kind=type||'normal';
+        sceSubscribeEvents(context);
+        if(!sceRuntimeEnabled||!settings.enabled||settings.mode!=='automatic'||!['normal','regenerate','swipe'].includes(kind)){
+            sceSafeClear(context);return;
+        }
+        if(sceActiveRun){sceReleaseRunSignal(sceActiveRun);if(!['completed','failed','stopped','invalidated'].includes(sceActiveRun.state))
+            sceMarkUnsuccessful(sceActiveRun,'unverified','Replaced by another request');}
+        sceActiveRun=null;
+        const lifecycle=sceLifecycleStart?.key===getChatKey(context)&&sceLifecycleStart.type===kind?sceLifecycleStart:null;
+        const started=lifecycle?.started??Date.now(),targetIndex=kind==='swipe'?Math.max(0,(context.chat?.length||0)-1):(context.chat?.length||0);
+        const prior=kind==='swipe'?context.chat?.[targetIndex]:null;
+        const id='SCE-'+(++sceRunCounter)+'-'+randomInt(1000000);
+        const packet=sceBuildPacket(context,true,kind,id);
+        // Preparation is synchronous. One atomic replacement, or a clear in the failure handler.
+        context.setExtensionPrompt(SCE_PROMPT_ID,packet.prompt,1,0,false,settings.role==='system'?0:1);
+        const run={id,key:getChatKey(context),type:kind,started,targetIndex,state:'prepared',prompt:packet.prompt,packet:{creative:packet.creative,structure:packet.structure},
+            settings:packet.settings,layers:packet.creative.layers.length,family:packet.structure?.family||null,
+            familyId:packet.structure?.familyId||null,observer:sceOn(packet.settings,'feedbackObserverEnabled'),
+            warningSent:!!packet.warning,payloadSeen:false,payloadPriority:0,streaming:null,received:false,rendered:false,ended:false,
+            before:prior?{raw:prior.mes,swipe:prior.swipe_id??null,started:Number(new Date(prior.gen_started))||0}:null,
+            previousProcessor:context.streamingProcessor||null,processor:null,signal:lifecycle?.signal||null};
+        sceActiveRun=run;
+        if(run.signal){run.abortListener=()=>sceMarkUnsuccessful(run,'stopped','Request signal aborted');run.signal.addEventListener?.('abort',run.abortListener,{once:true});}
+        sceSetReceipt(context,run);if(run.signal?.aborted)sceMarkUnsuccessful(run,'stopped','Request signal already aborted');
+        if(packet.structure&&run.observer)sceFeedbackPending(context,packet.structure.familyId,kind);
+        const label=typeof document!=='undefined'?document.getElementById('sce_last_roll'):null;
+        if(label)label.textContent='Prepared '+run.layers+' lens(es) · '+packet.words+' injected words';
+    }catch(error){
+        console.error('[Story Chaos Engine] Preparation failed; ordinary generation remains available.',error);
+        sceSafeClear(context);
+        if(sceActiveRun)sceMarkUnsuccessful(sceActiveRun,'failed','Extension preparation error');
+        else sceSetReceipt(context,{state:'failed',reason:'Extension preparation error',prompt:''});
+    }
+};
+function register(){
+    const context=sceContext();if(!context?.registerFunctionTool)return false;
+    context.registerFunctionTool({name:'story_chaos_roll',displayName:'Story Chaos Roll',description:'Get optional creative and structural guidance for the next fiction reply. Takes no arguments.',
+        parameters:{$schema:'http://json-schema.org/draft-04/schema#',type:'object',properties:{},additionalProperties:false},
+        action:async()=>{const current=sceContext(),s=sceSettings(current);if(!sceRuntimeEnabled||!s.enabled||s.mode!=='tool')return '{}';
+            // An invoked tool consumes its selections, without asserting response completion.
+            const packet=sceBuildPacket(current,false);sceSetReceipt(current,{state:'legacy',prompt:packet.prompt,
+                reason:'Completion monitoring requires automatic mode'});
+            return JSON.stringify({...packet.creative,structural:packet.structure,endingWatch:packet.warning,guidance:packet.prompt});},
+        formatMessage:()=> 'Creative guidance prepared',stealth:false});return true;
+}
+function sceSyncTool(context=sceContext()){
+    const s=sceSettings(context),wanted=sceRuntimeEnabled&&s.enabled&&s.mode==='tool';
+    if(wanted&&!sceToolRegistered)sceToolRegistered=register();
+    else if(!wanted&&sceToolRegistered){context?.unregisterFunctionTool?.('story_chaos_roll');sceToolRegistered=false;}
+}
+function sceDispose(){
+    sceRuntimeEnabled=false;sceReleaseRunSignal(sceActiveRun);
+    if(sceActiveRun&&sceActiveRun.state!=='completed')sceMarkUnsuccessful(sceActiveRun,'disabled','Extension disabled');
+    sceActiveRun=null;sceLifecycleStart=null;
+    if(sceFinishTimer)clearTimeout(sceFinishTimer);sceFinishTimer=null;
+    if(sceBootstrapTimer)clearTimeout(sceBootstrapTimer);sceBootstrapTimer=null;
+    sceUiInitObserver?.disconnect();sceUiInitObserver=null;sceUnsubscribeEvents();sceSafeClear();sceSyncTool();
+    for(const map of [SCE_RECORD_CACHE,sceWordIndexCache,SCE_FEEDBACK_STATES,SCE_RUN_RECEIPTS,recentModes,sceRecentCueHistory,sceRecentAnchorHistory,SCE_STRUCTURE_HISTORY,SCE_STRUCTURE_ANCHORS])map.clear();
+    if(typeof document!=='undefined')document.getElementById('sce_settings')?.remove();
 }
 
-// The default mode does NOT register a function tool, even when function
-// calling is enabled for other extensions.
-if (typeof document !== 'undefined') {
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', sceInit, { once: true });
-    } else {
-        sceInit();
-    }
+// UI values are assigned with .value / .textContent, never interpolated as HTML.
+function sceNode(id){return typeof document!=='undefined'?document.getElementById('sce_'+id):null;}
+function sceMutate(mutator){
+    const ctx=sceContext();if(!ctx)return;mutator(sceSettings(ctx));sceSettings(ctx);ctx.saveSettingsDebounced?.();sceRefreshUI();
+}
+function sceSlider(id,label,min=0,max=100){return '<label class="sce_line" for="sce_'+id+'"><span>'+label+'</span><output id="sce_'+id+'_out"></output></label>'+ '<input type="range" id="sce_'+id+'" min="'+min+'" max="'+max+'" step="1">';}
+function sceWeightControls(defs,prefix){return Object.entries(defs).map(([id,def])=>
+    '<label class="sce_cat" for="sce_'+prefix+id+'"><span>'+(def.name||def.title)+'</span>'+ '<select class="text_pole" id="sce_'+prefix+id+'"><option value="0">Off</option><option value="1">Low</option><option value="2">Normal</option><option value="3">High</option></select></label>').join('');}
+function sceFeatureControl(key,label){return '<label class="sce_line" for="sce_override_'+key+'"><span>'+label+'</span>'+ '<select class="text_pole" id="sce_override_'+key+'"><option value="auto">Auto</option><option value="on">On</option><option value="off">Off</option></select></label>'+ '<small id="sce_effective_'+key+'"></small>';}
+function sceAdvancedUI(panel){
+    const root=panel.querySelector('.sce_main_body');if(!root)return;
+    const section=document.createElement('details');section.className='sce_group sce_advanced';
+    section.innerHTML='<summary>Advanced controls</summary><div class="sce_stack">'+
+        '<label for="sce_mode">Operating mode</label><select class="text_pole" id="sce_mode"><option value="automatic">Automatic injection</option><option value="tool">Legacy function calling</option><option value="off">Off</option></select>'+
+        '<small id="sce_legacy_note">Legacy mode requires provider tool support and has no verified completion receipts.</small>'+
+        '<label for="sce_role">Injection role</label><select class="text_pole" id="sce_role"><option value="user">User</option><option value="system">System</option></select>'+
+        sceSlider('intensity','Creative randomness')+sceSlider('layers','Maximum creative lenses',1,5)+sceSlider('gravity','Context gravity')+
+        '<label for="sce_scope">Context window</label><select class="text_pole" id="sce_scope"><option value="full">Available history (bounded)</option><option value="recent">Recent 16 story messages</option></select>'+
+        '<details class="sce_group"><summary>Creative category weights</summary>'+sceWeightControls(SCE_CATEGORIES,'cat_')+'</details>'+
+        '<label class="sce_line" for="sce_antirepeat"><span>Discourage recent cues and anchors</span><input type="checkbox" id="sce_antirepeat"></label>'+
+        '<label for="sce_hidden_tags">Additional hidden block names (optional)</label><input class="text_pole" type="text" id="sce_hidden_tags" maxlength="2400" placeholder="my_tracker, character_state">'+
+        '<small>Names of XML-like blocks to exclude from analysis. Unclosed recognized blocks are also excluded.</small>'+
+        '</div>';
+    root.appendChild(section);
+}
+function sceStructureUI(panel){
+    const section=document.createElement('details');section.className='sce_group sce_structure_section';
+    section.innerHTML='<summary>Structural Entropy</summary><div class="sce_stack">'+sceFeatureControl('structureEnabled','Structural guidance')+
+        sceSlider('structure_influence','Structure influence')+sceSlider('structure_density','Beat density')+sceSlider('structure_grounding','Context grounding')+
+        '<label class="sce_line" for="sce_structure_anti_repeat"><span>Discourage recently used structures</span><input type="checkbox" id="sce_structure_anti_repeat"></label>'+
+        '<small>Soft recency penalties preserve variety without forcing a repeating family rotation.</small>'+
+        '<details class="sce_group"><summary>Structure family weights</summary>'+sceWeightControls(SCE_STRUCTURE_FAMILIES,'structure_')+'</details></div>';
+    panel.querySelector('.sce_main_body')?.appendChild(section);
+}
+function sceFeedbackUI(panel){
+    const section=document.createElement('details');section.className='sce_group sce_feedback_section';
+    section.innerHTML='<summary>Monitoring and feedback</summary><div class="sce_stack">'+
+        sceFeatureControl('feedbackObserverEnabled','Structural Observer')+sceFeatureControl('feedbackBalancerEnabled','Adaptive Balancer')+
+        sceSlider('feedback_strength','Balancing strength')+
+        '<label for="sce_feedback_window">Previous replies to measure</label><select class="text_pole" id="sce_feedback_window"><option value="4">4</option><option value="8">8</option><option value="16">16</option></select>'+
+        '<details class="sce_group"><summary>Traits the Balancer may vary</summary>'+
+        SCE_FEEDBACK_TRAITS.map(([key,label])=>'<label class="sce_line"><span>'+label+'</span><input type="checkbox" id="sce_trait_'+key+'"></label>').join('')+
+        '<small>Punctuation and paragraph arrangement are not variation targets by default. Leave them off when your main prompt fixes the format.</small></details>'+
+        sceFeatureControl('endingWatchEnabled','Closing-Beat Watch')+sceSlider('ending_strength','Correction sensitivity')+
+        '<small>Lower values require stronger evidence. This is a heuristic sensitivity control, not a probability of correctness.</small>'+
+        '<label for="sce_ending_window">Previous replies to check</label><select class="text_pole" id="sce_ending_window"><option value="4">4</option><option value="8">8</option><option value="16">16</option></select>'+
+        '<label for="sce_ending_minimum">Minimum matching endings</label><select class="text_pole" id="sce_ending_minimum"><option value="3">3</option><option value="4">4</option><option value="5">5</option></select>'+
+        '<div class="sce_actions"><button type="button" class="menu_button" id="sce_feedback_analyze">Analyze replies</button><button type="button" class="menu_button" id="sce_feedback_reset">Reset learned associations</button></div>'+
+        '<pre class="sce_preview" id="sce_feedback_report" hidden></pre></div>';
+    panel.querySelector('.sce_main_body')?.appendChild(section);
+}
+const SCE_UI_SLIDERS=[['intensity','intensity'],['layers','maxLayers'],['gravity','contextGravity'],['keywordboost','keywordBoost'],
+    ['structure_influence','structureInfluence'],['structure_density','beatDensity'],['structure_grounding','structureGrounding'],
+    ['feedback_strength','feedbackStrength'],['ending_strength','endingWatchStrength']];
+function sceRefreshUI(){
+    const ctx=sceContext();if(!ctx||typeof document==='undefined'||!document.getElementById('sce_settings'))return;
+    const s=sceSettings(ctx);
+    const value=(id,v)=>{const el=sceNode(id);if(el)el.value=String(v);};
+    const check=(id,v)=>{const el=sceNode(id);if(el)el.checked=!!v;};
+    check('enabled',s.enabled&&s.mode!=='off');check('autopilot',s.autopilotEnabled);check('notify',s.notifyAfterReply);
+    value('preset',scePresetMatch(s));value('keywords',s.customKeywords);value('hidden_tags',s.hiddenTags);value('mode',s.mode);value('role',s.role);value('scope',s.contextScope);
+    check('antirepeat',s.antiRepeat);check('structure_anti_repeat',s.structureAntiRepeat);
+    for(const [id,key] of SCE_UI_SLIDERS){value(id,s[key]);const out=sceNode(id+'_out');if(out)out.textContent=s[key]+(id==='layers'?'':'%');}
+    for(const [id,key] of [['feedback_window','feedbackWindow'],['ending_window','endingWatchWindow'],['ending_minimum','endingWatchMinimum']])value(id,s[key]);
+    const minimum=sceNode('ending_minimum');if(minimum?.options)for(const option of minimum.options)option.disabled=Number(option.value)>s.endingWatchWindow;
+    for(const key of SCE_FEATURES){value('override_'+key,s.featureOverrides[key]);const label=sceNode('effective_'+key);
+        if(label)label.textContent='Effective: '+(sceEffective(s,key)?'On':'Off / prerequisite disabled')+' · '+
+            (s.featureOverrides[key]==='auto'?(s.autopilotEnabled?'controlled by Autopilot':'using saved individual setting'):'explicit override');}
+    for(const [key] of SCE_FEEDBACK_TRAITS)check('trait_'+key,s.balanceTraits[key]);
+    for(const id of Object.keys(SCE_CATEGORIES))value('cat_'+id,s.categoryWeights[id]);
+    for(const id of Object.keys(SCE_STRUCTURE_FAMILIES))value('structure_'+id,s.structureWeights[id]);
+    sceRenderReceipt(ctx);
+}
+function sceCancelCurrent(reason){
+    sceSafeClear();
+    if(sceActiveRun){if(sceActiveRun.state!=='completed')sceMarkUnsuccessful(sceActiveRun,'unverified',reason);sceReleaseRunSignal(sceActiveRun);sceActiveRun=null;}
+    sceLifecycleStart=null;
+}
+function sceBindUI(){
+    const on=(id,event,fn)=>{const el=sceNode(id);if(!el)throw new Error('Missing control: '+id);el.addEventListener(event,fn);};
+    on('enabled','change',e=>{sceMutate(s=>{s.enabled=e.target.checked;if(s.enabled&&s.mode==='off')s.mode='automatic';});
+        if(!e.target.checked)sceCancelCurrent('Engine disabled');sceSyncTool();});
+    on('autopilot','change',e=>{sceMutate(s=>{s.autopilotEnabled=e.target.checked;if(s.autopilotEnabled){s.enabled=true;s.mode='automatic';}});sceSyncTool();});
+    on('apply_preset','click',()=>sceApplyPreset(sceContext(),sceNode('preset').value));
+    on('keywords','input',e=>sceMutate(s=>{s.customKeywords=e.target.value.slice(0,2400);}));
+    on('hidden_tags','input',e=>sceMutate(s=>{s.hiddenTags=e.target.value.slice(0,2400);}));
+    on('notify','change',e=>sceMutate(s=>{s.notifyAfterReply=e.target.checked;}));
+    on('mode','change',e=>{sceMutate(s=>{s.mode=e.target.value;if(s.mode!=='automatic')s.autopilotEnabled=false;if(s.mode==='off')s.enabled=false;});sceCancelCurrent('Operating mode changed');sceSyncTool();});
+    on('role','change',e=>sceMutate(s=>{s.role=e.target.value;}));
+    on('scope','change',e=>sceMutate(s=>{s.contextScope=e.target.value;}));
+    on('antirepeat','change',e=>sceMutate(s=>{s.antiRepeat=e.target.checked;}));
+    on('structure_anti_repeat','change',e=>sceMutate(s=>{s.structureAntiRepeat=e.target.checked;}));
+    for(const [id,key] of SCE_UI_SLIDERS)on(id,'input',e=>sceMutate(s=>{s[key]=Number(e.target.value);}));
+    for(const key of SCE_FEATURES)on('override_'+key,'change',e=>sceMutate(s=>{s.featureOverrides[key]=e.target.value;}));
+    for(const [key] of SCE_FEEDBACK_TRAITS)on('trait_'+key,'change',e=>sceMutate(s=>{s.balanceTraits[key]=e.target.checked;}));
+    for(const [id,key] of [['feedback_window','feedbackWindow'],['ending_window','endingWatchWindow'],['ending_minimum','endingWatchMinimum']])
+        on(id,'change',e=>sceMutate(s=>{s[key]=Number(e.target.value);}));
+    for(const id of Object.keys(SCE_CATEGORIES))on('cat_'+id,'change',e=>sceMutate(s=>{s.categoryWeights[id]=Number(e.target.value);}));
+    for(const id of Object.keys(SCE_STRUCTURE_FAMILIES))on('structure_'+id,'change',e=>sceMutate(s=>{s.structureWeights[id]=Number(e.target.value);}));
+    on('preview','click',()=>{const p=sceBuildPacket(sceContext(),true);const el=sceNode('preview_text');
+        el.textContent=(p.prompt||'No active cues or keywords.')+'\n\nSampled preview · '+p.words+' words. Includes adaptive selection and eligible ending corrections; does not consume history.';el.hidden=false;});
+    on('feedback_analyze','click',()=>{const el=sceNode('feedback_report');el.textContent=sceFeedbackReportText();el.hidden=false;});
+    on('feedback_reset','click',()=>{const ctx=sceContext();SCE_FEEDBACK_STATES.delete(sceFeedbackIdentity(ctx));
+        if(ctx?.chatMetadata){delete ctx.chatMetadata.storyChaosEngineLearning;ctx.saveMetadataDebounced?.();}
+        const el=sceNode('feedback_report');el.textContent='Learned associations cleared. Saved story messages are unchanged.';el.hidden=false;});
+}
+function sceWaitForSettingsPanel(){
+    if(sceUiInitObserver||!sceRuntimeEnabled||typeof document==='undefined'||!document.body||typeof MutationObserver!=='function')return;
+    sceUiInitObserver=new MutationObserver(()=>{
+        if(!sceContext()||!document.getElementById('extensions_settings'))return;
+        sceUiInitObserver.disconnect();sceUiInitObserver=null;sceInit();
+    });sceUiInitObserver.observe(document.body,{childList:true,subtree:true});
+}
+function sceInit(){
+    if(!sceRuntimeEnabled)return;const ctx=sceContext();if(!ctx){sceWaitForSettingsPanel();return;}
+    sceSubscribeEvents(ctx);sceSettings(ctx);sceSyncTool(ctx);
+    if(typeof document==='undefined')return;
+    const root=document.getElementById('extensions_settings');if(!root){sceWaitForSettingsPanel();return;}
+    if(document.getElementById('sce_settings')){sceRefreshUI();return;}
+    const panel=document.createElement('div');panel.id='sce_settings';
+    panel.innerHTML='<details class="sce_main_group"><summary>🎲 Story Chaos Engine · v'+SCE_VERSION+'</summary><div class="sce_main_body">'+
+        '<label class="sce_line" for="sce_enabled"><strong>Engine enabled</strong><input type="checkbox" id="sce_enabled"></label>'+
+        '<label class="sce_line" for="sce_autopilot"><span>Autopilot</span><input type="checkbox" id="sce_autopilot"></label>'+
+        '<small>Autopilot supplies defaults. Explicit feature Off overrides are always honored.</small>'+
+        '<label for="sce_preset">Creative tuning</label><div class="sce_actions"><select class="text_pole" id="sce_preset"><option value="custom">Custom / current settings</option><option value="subtle">Subtle</option><option value="balanced">Balanced</option><option value="wild">Wild</option></select><button type="button" class="menu_button" id="sce_apply_preset">Apply preset</button></div>'+
+        '<label for="sce_keywords">Your optional keywords</label><textarea class="text_pole" id="sce_keywords" rows="3" maxlength="2400" placeholder="coffee, velvet, awkward pause"></textarea>'+
+        sceSlider('keywordboost','Keyword influence')+
+        '<label class="sce_line" for="sce_notify"><span>Brief verified-completion notifications</span><input type="checkbox" id="sce_notify"></label>'+
+        '<div class="sce_run_receipt" id="sce_run_receipt" role="status" aria-live="polite"></div>'+
+        '<small>Host completion and observed prompt inclusion are separate checks. Neither proves the model followed its cues.</small>'+
+        '<small id="sce_last_roll">No roll this session.</small>'+
+        '<button type="button" class="menu_button" id="sce_preview">Preview complete packet</button><pre class="sce_preview" id="sce_preview_text" hidden></pre>'+
+        '</div></details>';
+    root.appendChild(panel);
+    try{sceAdvancedUI(panel);sceStructureUI(panel);sceFeedbackUI(panel);sceBindUI();sceRefreshUI();}
+    catch(error){panel.remove();console.error('[Story Chaos Engine] Settings UI failed.',error);}
+}
+globalThis.storyChaosEngineLifecycle={
+    enable(){sceRuntimeEnabled=true;sceInit();},disable:sceDispose,activate:sceInit,
+};
+if(typeof document!=='undefined'){
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',sceInit,{once:true});else sceInit();
 }

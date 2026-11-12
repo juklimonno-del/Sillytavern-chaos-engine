@@ -1,326 +1,102 @@
-# Story Chaos Engine 🎲
+# Story Chaos Engine 1.7.1
 
-## New in v1.7.0: Reliability + Autopilot + completion receipts ✅
+Browser-side creative guidance for SillyTavern. One ordinary model request, one depth-zero injection, no additional inference service, analytics, or API key.
 
-**Upgrade without losing your knobs.** The eleven creative-category weights, ten structural
-families, custom keywords, keyword influence, and advanced controls are retained. New
-**Autopilot** is opt-in on upgrade: it activates structural variation, feedback sampling,
-the balancing loop and Closing-Beat Watch together, without overwriting individual advanced
-feature settings. Turning it off restores their existing on/off behavior. The simple panel
-keeps the keyword bank and influence slider visible; advanced controls are folded away.
-Choose Subtle, Balanced or Wild to apply a starting set of tuning values. A preset changes
-the numerical controls only when you explicitly select it, and never rewrites the keyword
-bank or category weights.
+**Version:** 1.7.1, based on audited upstream commit `1982b0744537f09e3ea0dd73e4c91b0dc81b9818` (v1.7.0). Repository publication and CI results are recorded in the release pull request. `VERIFICATION.md` distinguishes original archive evidence from repository integration checks.
 
-**After a response completes**, SillyTavern's assistant-message-rendered event updates
-a per-chat status line with a completion receipt. If **Brief completion notifications**
-is on, a short toast appears. The receipt verifies that the engine injected guidance
-and SillyTavern rendered a subsequent assistant reply; **it does not prove the model
-followed every suggestion**. It can independently flag repeated endings measured in
-the completed reply history. Stopped or failed generations are never marked completed.
-Notifications can be disabled without disabling analysis.
+## What changed
 
-### v1.7 technical improvements
+This corrective version keeps all eleven creative categories, ten structural families, custom keywords, keyword influence, individual weights, context controls, and the User/System injection-role choice. It fixes the second audit's control, lifecycle, sampling, recurrence, and testing defects. See `AUDIT-FIXES.md` for the issue-by-issue map and `VERIFICATION.md` for what was actually tested.
 
-- Context cache checks full sampled message-body hashes; earlier edits and same-length
-  swipes can no longer silently reuse an obsolete word bank.
-- Internal tracker, thinking and analysis markup is stripped from lexical/structural
-  sampling, without deleting ordinary narration.
-- The ending detector now distinguishes *reading a message* from *sending one* and declines
-  actor attribution when multiple names make a clause ambiguous.
-- Closing-Beat Watch no longer constructs unused structural fingerprints. Reused response
-  fingerprints are cached and invalidated after edits.
-- Previously calculated creative focus, optional pacing and wildcard fields now reach the
-  generation prompt rather than being thrown away.
-- Generation preparation catches failures, clears old injection state, and leaves ordinary
-  generation unblocked.
-- The completion receipt uses standard SillyTavern events and adds no extra model calls.
+The everyday panel has an **Engine enabled** master switch, **Autopilot**, your keyword bank, an explicit preset Apply button, and an optional short completion notice. Fine tuning remains in collapsed sections. No analysis text is appended to your story.
 
-**Known limits:** lexical detection remains heuristic; a new sentence can mean the same
-story beat, and a different grammatical description may evade the watcher. The adaptive
-balancer still only learns mechanical structural traits and resets on browser reload.
-For now, semantic understanding remains outside the lightweight default extension.
+## Install or update
 
----
+For a Git-managed installation, use SillyTavern's Extension Manager to install or update from [juklimonno-del/Sillytavern-chaos-engine](https://github.com/juklimonno-del/Sillytavern-chaos-engine), then reload SillyTavern. The updater follows the repository branch; confirm that the installed manifest and panel both show **1.7.1**. Back up local modifications before updating.
 
+### Optional manual update from the audited 1.7.0 files
 
-## New in v1.6.0: Closing-Beat Watch 🔁
+Stop SillyTavern first. Extract the archive into a separate folder, not on top of the installed extension. From the extracted folder, run:
 
-**This release fixes a blind spot in Structural Feedback:** the Observer could identify paragraph/quotation patterns, but not a character repeatedly doing the same thing near the end of every reply. Changing abstract structures cannot, by itself, prevent that recurring behavior.
-
-The **Closing-Beat Watch** is a separate, optional local detector that looks for repeated *recognizable closing actions* and repeated *literal three-token sequences* in recent completed assistant replies. It operates before the next normal generation, so the entire creative roll, structural blueprint, and any measured repetition note still travel in **one ordinary Gemini request**.
-
-### Activation
-
-1. Update Story Chaos Engine and reload SillyTavern.
-2. In **🎲 Story Chaos Engine → 📊 Structural Feedback → 🔁 Closing-Beat Watch**, enable **Watch recurring closing actions**.
-3. Start with **Ending-repeat avoidance strength 85%**, **last 8 responses**, and **3 matching replies**.
-4. Click **Analyze current replies**. It reports a recurring closing motif when enough evidence is available.
-5. Keep **Structural Entropy** on. At **Structure influence 80–90%**, the injected blueprint now explicitly asks for a visibly different narrative arrangement rather than merely offering background inspiration.
-
-**Closing-Beat Watch is off by default on upgrade.** It does not require the Structural Observer or empirical Balancer to be enabled. If the Balancer is already on, it continues to operate independently.
-
-### Example: recurring texting endings
-
-If the last several assistant replies end with variations of *Bonnie texting someone*, the watcher can find a repeated actor + messaging activity even when the exact wording changes: *texted*, *sent a message*, *typed out a text*, *messaged someone*.
-
-The injected note will say, in effect:
-
-```text
-[ENDING-PATTERN WATCH: MEASURED REPETITION, NOT A STORY DIRECTIVE]
-Observed pattern in recent closing passages:
-Bonnie + text or message activity (4 of 8 completed assistant replies).
-
-For the next response, do not default to this same closing behavior.
-Let existing motives and circumstances decide what actually happens and how it ends.
-Do not merely relocate the same behavior to an earlier paragraph or
-another character, and don't force the opposite.
-...
+```sh
+python scripts/apply_release.py "/path/to/your/existing/Sillytavern-chaos-engine"
 ```
 
+This is a dry run. It verifies the existing files against the audited v1.7.0 Git blob hashes and validates the release's checksums. It does not merge changes from arbitrary newer versions. To apply the displayed plan:
 
-This is **not** a prohibition on characters texting. If the user's latest turn explicitly asks for the same action, or continuity requires it, the engine suppresses or softens its nudge and the story can continue normally.
-
-### Objectivity and limitations
-
-- There is **no special rule for Bonnie or texting**. The watcher uses the same frequencies and recency threshold for all recognized activities, including hugging, calling, laughing, kissing, drinking, leaving, sighing, asking questions, and more.
-- It analyzes the last **two paragraphs**, within a bounded character range, of each sampled completed assistant reply. User messages, system messages, and tool results are excluded.
-- A recurrence must reach the selected count threshold **and** appear in at least **two of the three most recent eligible replies**. This avoids treating an old pattern as current.
-- It also detects repeated literal three-token snippets, using simple word normalization, for behaviors outside its fixed action vocabulary.
-- The analysis is **lexical, not semantic**. Mentioning a text message is not necessarily sending one. Pronouns, nuanced paraphrases, and narration without an explicit actor can be missed or misclassified. It does not pretend to infer true intent, causation, quality, or the morality of a character's behavior.
-- It offers a **bounded corrective hint**, not a hard ban or a mandate to create action. The model may ignore it, especially if stronger or conflicting instructions are present.
-- It preserves the existing **depth-0 automatic prompt injection**, incurs **zero additional model/API requests**, and doesn't edit saved chat history.
-
-### Why Structure Influence now matters more
-
-Previously, Structure Influence mainly affected family selection and called the resulting blueprint a "strong preference." In v1.6, it also changes the **execution wording**:
-
-- **Below 50**: gentle influence, free-form authoring.
-- **50–79**: ask the model to make the selected architecture recognizable without inventing forced plot events.
-- **80–100**: ask the model to visibly organize the reply according to the selected structure rather than its habitual reaction-dialogue-closing pattern.
-
-These are still flexible writing directions, not mandatory paragraph counts. Keep your main prompt's length/formatting requirements, and remove other fixed beat templates that conflict with Structural Entropy.
-
----
-
-## New in v1.5.0: Neutral Structural Observer + optional Balancer 📊
-
-**Structural Feedback is an opt-in, on-device feedback loop.** The extension examines completed model replies *before the next generation*, measures mechanical writing patterns, and can adjust later Structural Entropy rolls based on **observed associations**, not a built-in literary taste.
-
-It does **not** make an API call, invoke another LLM, grade characters, inspect private reasoning, or rewrite the response after the model has generated it. Gemini still receives one normal request in **Automatic prompt injection** mode.
-
-### Three independent layers
-
-1. **Structural Observer**: Records measurements, not judgments. It reads up to 4, 8, or 16 previous completed model replies in the locally loaded SillyTavern chat. It ignores user messages, system and tool messages. A swipe/regeneration excludes the last model message about to be replaced.
-2. **Empirical Balancer**: Optional. It connects the structural family selected for a normal generation with the actual response that appeared afterward. It remembers only a small structural fingerprint and a message index/signature in the browser session. It does not assume in advance what a family *ought* to produce.
-3. **Structural Entropy**: Uses the Balancer's small probability multipliers when there is enough evidence. Otherwise, it rolls using your original family weights, context settings, and anti-repetition choices.
-
-### What gets measured
-
-- **Matched quotation coverage**: fraction of response characters inside recognizable quotation delimiters; this is **not** guaranteed to be dialogue.
-- **Paragraph count and relative paragraph-length arrangement**: single, front-heavy, back-heavy, even, or mixed, using fixed mechanical thresholds.
-- **Terminal punctuation**: period, question mark, exclamation mark, ellipsis, or other.
-- **Literal repeated text**: the number of replies sharing the exact same first or last four word tokens, and the number of distinct four-token sequences repeated across replies.
-- **Median word and paragraph counts**, plus frequencies of the above categories.
-
-It never classifies sentiment, sexuality, morality, plausibility, profanity, scene intensity, character motivation, writing quality, or whether a topic is desirable. It also does **not** claim to recognize abstract plot beats reliably.
-
-**No statistical method is perfectly assumption-free:** Choosing paragraph and quotation thresholds introduces conventions. They are documented, applied symmetrically, and are not presented as quality standards.
-
-### When the Balancer can act
-
-It is deliberately conservative:
-
-- Both **Observer** and **Balancer** must be on, **Structural Entropy** must be enabled, and **Balancing strength** must be above zero.
-- At least **4 previous model replies** must be available.
-- At least one measured property must have the *same observed value in at least 67%* of that analysis window. The property can be any quotation-coverage band, any paragraph arrangement, or any terminal punctuation category. There is no favored value.
-- A particular structural family must have at least **2 confirmed subsequent model replies associated with it** in the current browser session before its weight can be adjusted.
-- Each family multiplier is limited to **0.6×–1.4×** even at high strength. Small samples receive small adjustments. A family's weight of **Off (0)** always remains zero.
-- When samples don't establish any reliable link, the multiplier remains **1.0×**, which means **no automatic correction**.
-
-This is a correlation-based heuristic, not proof that a structure caused any observed text pattern. It doesn't set target percentages for dialogue, paragraph structure, or endings. If the actual replies repeatedly share a measured trait, families previously associated with that trait can receive a slightly lower probability, while families associated with different results can receive a slightly higher one.
-
-A family associated with dialogue-heavy replies is **not intrinsically penalized**. If later history is mostly sparse in quotations, the same family can receive the reverse adjustment.
-
-### Enable and inspect
-
-In **Extensions → 🎲 Story Chaos Engine → 📊 Structural Feedback**:
-
-1. Enable **Structural Entropy** under its separate section.
-2. Enable **the Observer** to collect purely descriptive information and paired outcomes.
-3. Optionally enable **adaptive Balancer** once you'd like the engine to adjust family selection.
-4. Choose **Balancing strength** (suggested starting point: **40%**) and an analysis window (**8 replies** is a reasonable start).
-5. Select **📊 Analyze current replies** at any time. The report gives exact counts and shows any actual family multipliers. This button is read-only and makes no model call.
-6. **Reset learned associations** if you want to wipe session-local family/outcome matches while leaving your chat untouched.
-
-**Both new checkboxes default to Off for existing installations.** Upgrading will not silently change your fiction. The existing v1.4 creative and structural controls carry over.
-
-### Technical limitations
-
-The Observer examines **the final text visible in the local chat**, not the full API context or any hidden reasoning. Repeated *plot logic* can evade these mechanical measurements. Family/outcome matching is session-local and conservative, and it only pairs responses that can be confidently attributed to a normal generation. A message edited or replaced after the fact invalidates its learned association. A browser reload resets these associations.
-
-The Balancer can influence **future structure selection only**. It cannot guarantee Gemini will follow a blueprint, or detect the repetition in the response currently being written. Feedback adjustments are internal probability multipliers; they are **not** extra directives declaring which sort of fiction is good or bad.
-
----
-
-## New in v1.4.0: Structural Entropy 🧬
-
-Structural Entropy is a **second, completely independent source of randomness**. The existing Chaos Engine chooses creative directions and context-related words. Structural Entropy chooses **how the next response can unfold**. The LLM still invents the actual actions, dialogue, outcomes, and causal logic.
-
-It's **off by default when upgrading** so your existing story output stays the same until you enable it.
-
-### Turn it on
-
-1. Update the extension from SillyTavern's Extension Manager and reload the page.
-2. Open **Extensions → 🎲 Story Chaos Engine → 🧬 Structural Entropy**.
-3. Check **Enable structural rolls**.
-4. Set **Structure influence** to around **65%**, **Beat density** to **55%**, and **Context grounding** to **75%** for an exploratory starting point.
-5. Click **🎲 Preview structure** as often as you like. Every click makes a new *local* roll and doesn't consume anti-repetition history.
-6. Generate a story response normally. The creative roll and structural blueprint are injected together in **one normal prompt** at depth 0.
-
-**No tool calling is required** and **no extra model/API request is made** by the extension in automatic mode.
-
-### Structural Entropy controls
-
-| Control | Meaning |
-| --- | --- |
-| Enable structural rolls | Off by default. Adds an independent structural blueprint to the standard creative roll |
-| Structure influence (0–100%) | 0 disables structural guidance. Higher values favor less-conventional families and create more varied distributions of narrative attention; this is not the API temperature |
-| Beat density (0–100%) | Rough desired number of developments, **not** paragraph count. Actual number is capped by the chosen structure family and gently varied at intermediate values |
-| Context grounding (0–100%) | Weighted structural families according to recent chat dialogue/actions/callbacks, with optional existing story-word anchors. At 0, no anchors or contextual family bias |
-| Avoid repeating recent structures | Prefer families not used in the last **four** structural rolls, when other enabled families are available. It also avoids identical blueprint signatures when possible |
-| Structure family weights | Off, Low, Normal, or High for each family |
-| Preview structure | Rolls and shows the proposed blueprint, without changing chat history or triggering a model call |
-
-Ten structure families are included: **Sustained moment**, **Domino chain**, **Parallel threads**, **Delayed echo**, **Conversational drift**, **Directional pivot**, **Deliberate anti-climax**, **Mosaic of moments**, **Consequence first**, and **Elastic time**.
-
-Each roll chooses a family, a variable number of abstract phases, a relative attention distribution (such as `2 : 4 : 1`), a transition style, and a suggested kind of ending. The engine mixes different phrasings for each family rather than enforcing one universal plot skeleton.
-
-### Example
-
-If a café scene mentions a stolen key and a suspicious friend, a roll might look like this:
-
-```text
-[STRUCTURAL ENTROPY: OPTIONAL RESPONSE ARCHITECTURE, NOT PREWRITTEN PLOT]
-Structural family: Parallel threads (moderate nudge)
-Development density: 4 area(s) of attention, not paragraph requirements
-Relative attention: 3 : 1 : 2 : 2
-Connection style: Intercut ongoing activities
-Existing story words to consider (not mandatory): "key", "coffee"
-Possible abstract phases:
-1. Thread A: Follow an existing activity
-2. Thread B: Let someone pursue a separate priority
-3. Thread A: Return to the first activity with a changed detail
-4. Thread B: Attend to a second independent activity
-Suggested closing behavior: Finish on a completed small action, not a hook.
-...
+```sh
+python scripts/apply_release.py "/path/to/your/existing/Sillytavern-chaos-engine" --apply
 ```
 
+The script makes a timestamped backup beside the target directory, atomically replaces the managed files, retires the five superseded mock-only test files, and prints a rollback command. It refuses to overwrite modified/newer code or tests, never follows managed-path symlinks, and does not touch `.git`, chat files, API credentials, or saved SillyTavern settings. It performs no Git commit or push. Python 3.9+ is required only for this optional installation helper, not by the extension.
 
-It **does not** tell the model to drop the key, invent a new character, force a reveal, or follow exactly four paragraphs. It tells the model *which narrative relationships and areas of attention might be interesting*, while the model interprets the actual story and character motivations.
+The deployable runtime files are `manifest.json`, `entry.js`, `index.js`, and `style.css`; retain `LICENSE`. A new manual installation can place those in one third-party extension folder. Do not enable two copies. For a manual update from the exact audited v1.7.0 files, the applier preserves `.git` and unrelated files instead of replacing the whole directory. If it detects modified or newer files, reconcile those changes manually. Keep local changes backed up before using the host's updater again.
 
-If a proposed phase doesn't fit the fiction, the model is instructed to merge or skip it. Existing formatting, length requirements, character ownership, and continuity take priority.
+Restart/reload SillyTavern and check that the panel says **v1.7.1**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
 
-### Context analysis: important limitations
+## Controls that mean what they say
 
-The extension reads the **locally available saved chat messages**, not the complete tokenized API prompt. Its context recognition is lightweight word counting and pattern matching: it can detect signs of conversations, physical activities, observations, and callbacks, but **does not semantically understand the whole story**.
+**Engine enabled** is the master power switch. Turning it off clears the active injection. Autopilot is not the master switch; it supplies automatic defaults for structure, observation, balancing, and closing-pattern monitoring.
 
-The extracted words are optional anchors, not facts that must be introduced or reenacted. The **context gravity** used by the original creativity engine and the **context grounding** used by Structural Entropy are separate settings. Both use the existing on-device context index, with no separate model inference.
+Each feature has **Auto / On / Off**. Auto follows Autopilot or your saved individual v1.7 setting. Explicit Off wins even with Autopilot enabled. The label below each control displays its effective state, including unmet prerequisites. For example, the Balancer cannot operate without structure and the Observer.
 
-The structural history and word cache live only in the browser session. A reload resets them; your actual SillyTavern chat is unaffected.
+The preset label is derived from the current numerical settings. It displays **Custom/current settings** when they do not match a named preset. Applying Subtle, Balanced, or Wild never rewrites keyword text or individual weights.
 
-For Gemini gateways, keep **Automatic prompt injection** as the operating mode and avoid old prompts forcing a tool call. **Legacy function calling** remains optional but can still trigger provider-specific HTTP 400 errors.
+All creative directions use the same category-aware layer budget. Disabled pacing/wildcard categories cannot leak separate legacy hints. With every category disabled, optional custom-keyword-only operation remains possible. Turn off structure and other feature overrides too when you want a pure keyword packet.
 
----
+## What the status indicator proves
 
-A configurable, GitHub-installable [SillyTavern](https://github.com/SillyTavern/SillyTavern) UI extension that adds **external randomness** to roleplay and interactive fiction.
+The receipt keeps two questions separate:
 
-## v1.3.0: Layered chaos with context bias
+1. Did the host provide enough evidence that this particular generation completed successfully?
+2. Was this run's guidance observed in the assembled outgoing request at a supported host event?
 
-The extension now has a **randomness mixer**. It can sample from eleven categories, combine multiple creative lenses, and select words and associations from what is actually happening in your SillyTavern conversation. Control the balance between established story details and weird lateral ideas.
+A message merely appearing on screen does not answer either question. For streams, completion additionally requires a matching finished, non-stopped, non-aborted processor. For non-streamed output, it requires matching request observation, new generation metadata, and received/rendered/end events. Replacement targets, old swipes, partial responses, chat switches, and stop events are tracked explicitly.
 
-The **v1.2.0 Gemini proxy workaround is preserved**. Automatic mode rolls locally *before* the generation request and injects the resulting creative note at depth zero. **No extra Gemini call and no tool-call response** are needed.
+The status may say **Host completion verified**, **Stopped/partial**, **Generation failed/partial**, **Completion unverified**, or **Receipt invalidated by an edit or swipe**. Missing evidence stays unverified. A late stop can revoke a receipt and its learned association. Notifications can be turned off without disabling diagnostics.
 
-### New controls
+“Guidance observed in assembled request” means the extension saw its exact marked packet in a supported local request event. It does not prove delivery through every downstream proxy, nor does any receipt prove model obedience or better storytelling. Another extension can still alter data after the observed event. These limits are intentional.
 
-Open **Extensions → Story Chaos Engine**:
+Legacy function-tool mode is retained, uses fresh current-chat context, and explicitly reports that verified completion monitoring requires automatic mode.
 
-| Setting | Effect |
-| --- | --- |
-| Operating mode | **Automatic** (default), legacy function calling, or Off |
-| Injection role | User (default for Gemini proxy compatibility) or System |
-| **Creative randomness (0–100%)** | At 0, one creative lens per turn. At 100, the engine draws as many different layers as allowed. Intermediate settings vary the number of layers. |
-| **Maximum creative layers (1–5)** | Upper bound on the number of simultaneous, independent category suggestions |
-| **Context gravity (0–100%)** | At high values, pull scene anchors and word sparks from chat history, and boost categories matching recent keywords. At low values, draw more unrelated category words |
-| **Context window** | Scan the current available chat (newest first, up to 300,000 characters) or just the 16 most recent story messages |
-| **Category weights** | Set each category to Off, Low, Normal, or High to bias how often it is chosen |
-| **Custom keywords** | Add comma/newline-separated words or short phrases |
-| **Custom keyword preference (0–100%)** | Chance to draw an optional word spark from your custom list |
-| **Avoid recent cues and anchors** | Avoid repeating recent selected directions and contextual anchor words within each chat, until the page reloads |
-| **Preview a roll** | Show the exact creative note without an API call, modifying chat history, or consuming the anti-repeat list |
+## Analysis and low-reasoning models
 
-Eleven independently weighted categories are available: **Story direction, Character impulses, Dialogue & voice, Relationships & friction, Setting & objects, Callbacks & consequences, Humor & absurdity, Physical & sensory, Curiosity & discovery, Pacing & structure, and Wildcards & detours.**
+The injected packet is bounded to 250 whitespace-separated words in the shipped cue vocabulary. It contains one architecture, a shared-budget selection of creative lenses, optional words, one contextual anchor at most, and an evidence-qualified correction when appropriate. A correction takes precedence over a separate closing suggestion. Pacing refines the chosen architecture rather than independently contradicting it.
 
-Any category can be turned off. The default weights preserve the original Story Direction cues while introducing more diverse possibilities.
+Keep your short main-prompt instruction to interpret the packet. The extension does not request verbose visible planning, alter the model's reasoning parameter, or call a second model.
 
-### Example of the injected text
+The repetition detector is intentionally conservative. Known character names are used for attribution; uncertain actors and weak action matches are diagnostic, not confident behavioral instructions. Explicit requests are scanned separately across the user turn and scoped to the requested actor. Negated/hypothetical mentions do not count as performed actions. Literal phrase repeats receive wording advice, not an invented semantic interpretation.
 
-```text
-[STORY CHAOS ENGINE: EXTERNAL CREATIVE CUES, NOT CHARACTER SPEECH]
-Roll: 712/1000 | Randomness: 65/100
-Existing story anchor: "teapot"
-Optional word sparks: "porcelain", "velvet"
-Optional lens [Character impulses]: A private priority quietly changes a character’s behavior.
-Optional lens [Setting & objects]: An overlooked object already present becomes relevant.
-...
-```
+The action vocabulary is primarily English. Equivalent plot beats, unknown NPCs, complex grammar, unconventional tracker formats, and other languages can evade detection. Conservative abstention is preferable to wrong steering. This remains a lexical assistant, not a semantic plot judge.
 
+## Performance, memory, and learning
 
-**These are optional creative lenses, not mandatory narrative beats.** If an idea contradicts the scene, characterization, established formatting, or continuity, the model is asked to disregard it.
+Cleaned/tokenized message records and ending motifs are cached. Context aggregates update by deltas rather than retokenizing the whole window when one message changes. Per-chat maps and message caches are bounded. Hidden blocks are removed before clipping; recognized unfinished blocks stay hidden. Optional additional hidden tag names are available in Advanced.
 
-### How the context bias works
+Whole-response word/paragraph/quotation statistics use complete cleaned text. Only expensive literal-sequence analysis uses marked head/tail sampling. Sampling never invents paragraph boundaries or text adjacency.
 
-The extension reads **chat messages already present in the local SillyTavern client**. It filters system/tool messages, tokenizes words (with browser word segmentation when available), weighs recurring words and recent references, and identifies nearby words. Scene anchors and some keyword sparks are sampled from those candidates.
+Learning associations require a verified successful generation. Normal replies, generated swipes, and regenerations can contribute. Small fingerprints and signatures, not story text, are saved in the current chat's metadata when the host exposes metadata saving. Matching associations can survive reloads. Edits, swipe changes, model/profile changes, and chat identity are checked before reuse. Reset learned associations removes that metadata, not your story.
 
-The category selection also gets a modest boost when recent story words match category themes (for example, *door* or *kitchen* can slightly favor Setting & objects).
+Paragraph-shape and punctuation balancing are off by default because a writing prompt may intentionally constrain them. They can be explicitly opted in. Equal evidence across all families produces no claimed effective adjustment. Structural recency uses soft penalties, avoiding the old forced five-family rotation.
 
-This is **lightweight, heuristic lexical matching**, not full semantic analysis or a second LLM. It is context-sensitive, but it cannot guarantee that every chosen word will be appropriate. It does **not** read every hidden prompt, World Info entry, or backend context component. "Whole chat" means the locally available **saved chat history**, subject to the 300,000-character processing cap. The model still interprets the injected cues alongside the full prompt it receives.
+## Development and tests
 
-The extension itself makes no external API calls. Its randomization runs in the browser, and the chosen words are included in the regular model prompt you already send.
-
-### Installation / updating
-
-Use SillyTavern's **Extensions → Install Extension** with:
-
-https://github.com/juklimonno-del/Sillytavern-chaos-engine
-
-If you already installed the extension, select **Update** in **Manage Extensions**, then reload the SillyTavern page. Existing **mode** and **role** settings are preserved and new defaults are added automatically.
-
-For Gemini through an OpenAI-to-Google proxy:
-
-1. Use **Automatic prompt injection** (default).
-2. Keep **User** injection role unless your proxy works better with System.
-3. **Remove old prompts telling Gemini to call `story_chaos_roll`.** Automatic mode does not need them.
-4. Disable global function calling if it is not needed for other extensions.
-5. Test with a clean chat if previous failed tool-call turns are still present in the history.
-
-The **Legacy function tool** mode is still available for models/providers that can reliably complete a tool-call round trip. It registers a parameter-free tool named `story_chaos_roll`. Some Gemini proxies reject that workflow; use automatic mode there.
-
-### Development
-
-Browser-side JavaScript, no build step or server component. Node.js 20+ for tests.
+The deployed browser extension has no build step or package dependencies. Node 22+ and Chrome/Chromium are needed for the full development suite. Set `CHROME_BIN` to an executable path when it is not installed in a standard Linux location. The browser harness uses Node's built-in WebSocket and an offline Chromium fixture; it does not contact a model provider.
 
 ```sh
 node --check index.js
-node --test
+node --input-type=module --check < entry.js
+node --test tests/*.test.cjs
+python -m unittest discover -s tests -p 'test_apply_release.py'
+node scripts/benchmark.cjs
 ```
 
-The GitHub Actions workflow runs the test suite when supported by GitHub's runner availability. Automated tests exercise the local context/selection engine and a mocked SillyTavern UI; **live compatibility with your particular provider still needs to be tested in SillyTavern**.
+The old fixtures have been consolidated into direct engine/lifecycle tests and a real-DOM browser suite. They are not left alongside the new implementation with incompatible assumptions. The applier backs up and retires only the five exact audited test files; locally modified tests cause a refusal. Coverage and deliberately changed expectations are documented in `TEST-MIGRATION.md`.
 
-### Privacy
+Browser tests execute the actual `index.js` and ESM lifecycle wrapper. Only relative resource URLs are mapped to data modules for offline loading. Host events and provider results are simulated. A real user-installed SillyTavern/Gemini streaming session remains a separate acceptance check; no such session was available for this package.
 
-No analytics or tracking. Never paste passwords or API keys into custom keywords; extension settings are saved in SillyTavern's ordinary settings store, not encrypted.
+## Privacy and license
 
-See the [SillyTavern extension API documentation](https://docs.sillytavern.app/for-contributors/writing-extensions/).
+No telemetry, new external requests, or remote analysis. Keywords remain ordinary SillyTavern settings, not encrypted secret storage. Do not put API keys or passwords in the keyword bank. Bounded learning metadata contains signatures and structural fingerprints. Clear it using the reset control.
 
-MIT license, see [LICENSE](LICENSE).
+MIT license. Original project: `juklimonno-del/Sillytavern-chaos-engine`.

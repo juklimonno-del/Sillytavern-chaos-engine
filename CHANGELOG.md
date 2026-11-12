@@ -1,0 +1,25 @@
+# Changelog
+
+## 1.7.1 — November 12, 2026
+
+Corrective release covering the second audit. The release pull request records repository integration and CI results; the original archive's local verification is preserved in `VERIFICATION.md`.
+
+- Replace render-only completion claims with generation-scoped host evidence and separate outgoing-guidance observation.
+- Honor explicit feature Off overrides under Autopilot; add a true master enable control.
+- Route all creative hints through one category-aware budget; retain keyword-only operation.
+- Make preset labels truthful and require explicit Apply.
+- Reduce confident lexical false positives, scope request exemptions to actors, and treat literal repeated wording separately.
+- Count whole-response metrics accurately and sanitize hidden content before sampling.
+- Respect regeneration deletion and swipe replacement timing consistently.
+- Replace forced structural rotations with soft recency weighting.
+- Consolidate the per-turn prompt into a compact packet suitable for brief interpretation.
+- Cache per-message analysis and update aggregate indexes by delta; bound retention.
+- Learn only from verified successful outputs; persist small fingerprints through supported host metadata storage.
+- Keep punctuation/paragraph balancing opt-in, show effective states, and include corrections in sampled preview.
+- Add lifecycle exports and cleanup, complete source tests, actual Chromium DOM tests, and a checksum-validated reversible package applier.
+- Preserve recency history for actual legacy function-tool calls without treating tool output as a verified completed reply; previews remain side-effect free.
+- Report browser startup exits promptly, including clean exits and signal termination, while keeping the actual Chromium suite mandatory.
+
+## 1.7.0
+
+Upstream base commit `1982b0744537f09e3ea0dd73e4c91b0dc81b9818` introduced Autopilot and completion receipts. The issues corrected above were found in its follow-up audit.
