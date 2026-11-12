@@ -1233,7 +1233,7 @@ function sceFormatEndingWatch(watch) {
         strength==='clear'
             ? 'For the next response, do not default to this same closing behavior. Let existing motives and circumstances decide what actually happens and how it ends.'
             : 'For the next response, consider an ending that does not repeat this activity by habit, if the established scene allows it.',
-        'Do not simply shift the same repeated action to another character or force a dramatic opposite.',
+        'Do not merely relocate the same repeated action to a different character or an earlier paragraph, and do not force a dramatic opposite.',
         'If a separate structural ending suggestion conflicts with this measured repetition, prioritize avoiding the habitual repeat unless the story requires it.',
         'If the user explicitly requests or established continuity requires it, let the action occur normally.',
         'This is a lexical recurrence estimate, not a judgment of meaning, quality, morality, or character behavior.',
