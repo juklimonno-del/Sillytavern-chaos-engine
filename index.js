@@ -1,7 +1,7 @@
-// Story Chaos Engine v1.8.0. Browser-only; no extra model calls or telemetry.
+// Story Chaos Engine v1.8.3. Browser-only; no extra model calls or telemetry.
 // Pure selection/analysis helpers are kept separate from the host lifecycle below.
 'use strict';
-const SCE_VERSION = '1.8.0';
+const SCE_VERSION = '1.8.3';
 const SCE_SETTINGS_KEY = 'storyChaosEngine';
 const SCE_PROMPT_ID = 'story_chaos_engine_auto';
 const SCE_FEATURES = ['structureEnabled', 'feedbackObserverEnabled', 'feedbackBalancerEnabled', 'endingWatchEnabled'];
@@ -284,10 +284,46 @@ const SCE_STRUCTURE_ENDINGS = ['Finish on a completed small action, not a hook.'
     'Allow a new ordinary priority to be underway.','Stop after a meaningful change; no forced cliffhanger.'];
 const SCE_LEGACY_STRUCTURE_IDS = ['sustained','domino','parallel','echo','dialogue','pivot','anticlimax','mosaic','reverse','time'];
 const SCE_ATTENTION_PROFILES = {
-    steady:'spread attention evenly',front:'linger early',back:'linger late',middle:'linger in the middle',
-    rising:'increase detail along the sequence',falling:'reduce detail along the sequence',
-    alternating:'alternate longer and shorter moments',bookends:'linger at both ends',uneven:'vary attention irregularly'
+    steady:'Spread attention evenly across the phases.',front:'Linger on the opening phase.',
+    back:'Linger on the closing phase.',middle:'Linger on the middle phase.',
+    rising:'Build detail steadily toward the final phase.',falling:'Give the opening the most detail and thin out toward the close.',
+    alternating:'Alternate longer and shorter moments across the phases.',bookends:'Linger on the first and last phases.',
+    uneven:'Vary attention irregularly across the phases.'
 };
+// Cue palette. "neutral" (the default) drops cues written to deflate tension and keeps the scene's own register.
+// "intense" also adds cues that carry stakes and consequence forward. "everyday" is the unchanged 1.8.0 library.
+const SCE_PALETTES = ['neutral','intense','everyday'];
+const SCE_DEFLATING = /\b(?:mundane|ordinary|trivial|unremarkable|petty|pettiness|non-catastrophic|embarrass\w*|joke|jokes|punchline|ridiculous|absurd\w*|tiny|uneventful|inconvenience\w*|obsession|misunderstands?|simply live|instead of drama|declined?|fail to happen|deflated|disproportionate|unhurried|flat|artificial (?:escalation|cliffhangers?)|new crisis|time skip|time jump|carrying on regardless)\b/iu;
+const SCE_NEUTRAL_ENDINGS = ['Finish on a completed action.','Stay with the current activity as it continues.',
+    'End on a distinctive behavior or physical detail.','Leave the conversation open between the speakers.',
+    'Stop after a meaningful change.','End on the scene’s strongest unresolved beat.'];
+const SCE_INTENSE_ENDINGS = [...SCE_NEUTRAL_ENDINGS.slice(0,5),'End on the beat that keeps the tension in play.','End on a consequence landing.'];
+const SCE_INTENSE_CUES = {
+    direction:['A choice made earlier now costs something real.','Each action narrows what the characters can still do.',
+        'Let the consequence of the last action land with its full weight.','A character holds a hard line and pays for it.'],
+    character:['A character acts from fear, hunger, loyalty or pride, without softening it.','Someone refuses to back down and the cost shows.'],
+    dialogue:['A quiet line carries the threat.','A character says the thing the scene has been circling.'],
+    social:['Power between two characters shifts and both feel it.','A betrayal or a debt comes due.'],
+    setting:['The environment presses in and limits what anyone can do.'],
+    consequences:['An earlier act leaves a visible, lasting mark.','What was done cannot be undone, and everyone acts accordingly.'],
+    physical:['Pain, fatigue or fear shows in the body and shapes each choice.','Sensory detail turns hard and specific.']
+};
+// Multipliers applied on top of the saved weights. A palette never rewrites saved settings.
+const SCE_PALETTE_CATEGORY = {neutral:{humor:0,wildcard:.5},intense:{humor:0,wildcard:.25},everyday:{}};
+const SCE_PALETTE_FAMILY = {neutral:{anticlimax:0,time:0},intense:{anticlimax:0,time:0},everyday:{}};
+function scePalette(s){return SCE_PALETTES.includes(s?.cuePalette)?s.cuePalette:'neutral';}
+function sceTonePool(pool,palette){
+    if(palette==='everyday')return pool;
+    const kept=pool.filter(x=>!SCE_DEFLATING.test(x));
+    return kept.length?kept:pool;
+}
+function sceCuePool(id,palette){
+    const cues=SCE_CATEGORIES[id].cues;
+    if(palette==='everyday')return cues;
+    const kept=sceTonePool(cues,palette);
+    return palette==='intense'?[...kept,...(SCE_INTENSE_CUES[id]||[])]:kept;
+}
+function sceEndings(palette){return palette==='everyday'?SCE_STRUCTURE_ENDINGS:palette==='intense'?SCE_INTENSE_ENDINGS:SCE_NEUTRAL_ENDINGS;}
 const SCE_STOP = new Set(('a about after again all already also am an and any are as at back be because '+
     'been before being between both but by can cannot could did do does doing dont down each either '+
     'else even every for from get gets getting give go going got had has have having he her here him '+
@@ -297,9 +333,14 @@ const SCE_STOP = new Set(('a about after again all already also am an and any ar
     'us very was we were what when where which while who why will with would yes you your yourself '+
     'character char user assistant system model prompt story scenes scene thoughts response message '+
     'messages words text instruction instructions').split(' '));
+// Function-like words that make poor context anchors and word sparks. Used for context indexing only.
+const SCE_WORD_STOP = new Set([...SCE_STOP,...('two three four five six seven eight nine ten eleven twelve '+
+    'tell tells told until closer toward towards around away without within across along beside behind above below '+
+    'against upon onto something someone anything anyone everything everyone nothing nobody thing things '+
+    'seem seems seemed maybe perhaps almost enough another could\'ve would\'ve').split(' ')]);
 const SCE_HIDDEN_TAGS = ['think','thinking','analysis','reasoning','cot','brainstorm','planning',
     'tracker','scene_tracker','state_tracker','sce_tracker','hidden','ooc','metadata','script','style'];
-const SCE_ADV_DEFAULTS = {intensity:55,maxLayers:3,contextGravity:75,contextScope:'full',customKeywords:'',keywordBoost:30,antiRepeat:true};
+const SCE_ADV_DEFAULTS = {intensity:55,maxLayers:3,contextGravity:75,contextScope:'full',customKeywords:'',keywordBoost:30,antiRepeat:true,cuePalette:'neutral'};
 const SCE_STRUCTURE_DEFAULTS = {structureEnabled:false,structureInfluence:65,beatDensity:55,structureGrounding:75,structureAntiRepeat:true};
 const SCE_FEEDBACK_DEFAULTS = {feedbackObserverEnabled:false,feedbackBalancerEnabled:false,feedbackStrength:65,feedbackWindow:8};
 const SCE_ENDING_WATCH_DEFAULTS = {endingWatchEnabled:false,endingWatchStrength:85,endingWatchWindow:8,endingWatchMinimum:3};
@@ -324,6 +365,7 @@ function sceSettings(context=sceContext()) {
         beatDensity:55,structureGrounding:75,feedbackStrength:65,endingWatchStrength:85}))s[key]=sceBound(s[key],fallback,0,100);
     s.maxLayers=sceBound(s.maxLayers,3,1,5);
     if(!['full','recent'].includes(s.contextScope))s.contextScope='full';
+    if(!SCE_PALETTES.includes(s.cuePalette))s.cuePalette='neutral';
     for(const key of ['customKeywords','hiddenTags'])s[key]=typeof s[key]==='string'?s[key].slice(0,2400):'';
     for(const key of ['feedbackWindow','endingWatchWindow'])s[key]=[4,8,16].includes(Number(s[key]))?Number(s[key]):8;
     s.endingWatchMinimum=Math.min(s.endingWatchWindow,[3,4,5].includes(Number(s.endingWatchMinimum))?Number(s.endingWatchMinimum):3);
@@ -426,7 +468,7 @@ function sceStoryText(value,extra='') {
 function sceFeedbackTextTokens(text){return String(text).toLowerCase().match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)||[];}
 function sceTokenize(text){
     SCE_ANALYSIS_COUNTERS.tokenizations++;
-    return sceFeedbackTextTokens(text).filter(x=>x.length>=(/[\u3040-\u30ff\u3400-\u9fff]/u.test(x)?2:3)&&x.length<=28&&!SCE_STOP.has(x)&&!/^\d+$/u.test(x));
+    return sceFeedbackTextTokens(text).filter(x=>x.length>=(/[\u3040-\u30ff\u3400-\u9fff]/u.test(x)?2:3)&&x.length<=28&&!SCE_WORD_STOP.has(x)&&!/^\d+$/u.test(x));
 }
 function sceEdgeSample(text,max){return text.length<=max?[text]:[text.slice(0,max/2),text.slice(-max/2)];}
 function sceBuildRecord(raw,hiddenTags=''){
@@ -456,7 +498,7 @@ function sceRecord(message,s=sceSettings()){
 function sceFeedbackMessageEligible(m){
     if(!m||m.is_user!==false||m.is_system||(m.gen_started!=null&&m.gen_finished==null)||typeof m.mes!=='string'||!m.mes.trim()||m.mes.trim()==='...'
         ||m.extra?.tool_calls||m.extra?.tool_result||m.extra?.type||m.extra?.is_partial||m.extra?.incomplete
-        ||m.mes.trimStart().startsWith('[STORY CHAOS ENGINE'))return false;
+        ||m.mes.trimStart().startsWith('[STORY CHAOS ENGINE')||m.mes.trimStart().startsWith('<scene_direction'))return false;
     const ctx=sceContext(),processor=ctx?.streamingProcessor;
     if(processor&&ctx.chat?.[processor.messageId]===m&&(!processor.isFinished||processor.isStopped||processor.abortController?.signal?.aborted))return false;
     const known=SCE_MESSAGE_STATUS.get(m);
@@ -553,14 +595,15 @@ const SCE_STRUCTURE_ANCHORS=new SceBoundedMap();
 function generateCreativeRoll(preview=false){return JSON.stringify(sceLayeredRoll(sceContext(),preview));}
 function sceLayeredRoll(context=sceContext(),preview=false,structure=null){
     const s=context?._sceSettings||sceSettings(context),index=context?._sceIndex||sceWordIndex(context),key=getChatKey(context);
+    const palette=scePalette(s),tone=SCE_PALETTE_CATEGORY[palette]||{};
     const old=sceRecentCueHistory.get(key)||[],candidates=Object.entries(SCE_CATEGORIES)
-        .filter(([id])=>s.categoryWeights[id]>0).map(([id,cat])=>({value:id,
-            weight:s.categoryWeights[id]*(1+s.contextGravity/100*.7*Math.min(4,cat.triggers.filter(x=>index.recent.has(x)).length))}));
+        .filter(([id])=>s.categoryWeights[id]*(tone[id]??1)>0&&sceCuePool(id,palette).length>0).map(([id,cat])=>({value:id,
+            weight:s.categoryWeights[id]*(tone[id]??1)*(1+s.contextGravity/100*.7*Math.min(4,cat.triggers.filter(x=>index.recent.has(x)).length))}));
     const target=1+Array.from({length:s.maxLayers-1},()=>sceChance(s.intensity)).filter(Boolean).length,layers=[];
     while(layers.length<target&&candidates.length){
         const id=sceWeighted(candidates),def=SCE_CATEGORIES[id];
         // Architecture owns pacing when present. A pacing lens may refine but not contradict it.
-        const pool=id==='pacing'&&structure?['Vary moment-to-moment duration inside the selected arrangement.']:def.cues;
+        const pool=id==='pacing'&&structure?['Vary moment-to-moment duration inside the selected arrangement.']:sceCuePool(id,palette);
         const recent=id==='direction'?(recentModes.get(key)||[]):old.filter(x=>x.startsWith(id+':')).map(x=>x.slice(id.length+1));
         const instruction=s.antiRepeat?pickFresh(pool,recent):pick(pool);
         layers.push({id,title:def.name,instruction});candidates.splice(candidates.findIndex(x=>x.value===id),1);
@@ -760,9 +803,9 @@ function sceStructureSignals(context=sceContext()){
         observation:count(/\b(?:noticed|watched|saw|heard|glanced|looked|observed|realized|stared|wondered)\b/giu)};
 }
 function sceStructureTargetCount(density){const base=1+Math.round(density*4/100),jitter=density>10&&density<90?randomInt(3)-1:0;return Math.min(5,Math.max(1,base+jitter));}
-function sceStructureBlueprint(id,count){
+function sceStructureBlueprint(id,count,palette='everyday'){
     const f=SCE_STRUCTURE_FAMILIES[id],middle=[],used=[];
-    const choose=pool=>sceStructurePhase(pool,used);
+    const choose=pool=>sceStructurePhase(pool,used,palette);
     if(id==='sustained')return count>1?[choose(f.phases[0]),choose(f.phases[1])]:[choose(f.phases[0])];
     if(id==='parallel'){
         for(let i=0;i<count;i++)middle.push((i%2?'Thread B: ':'Thread A: ')+choose(f.phases[i%2]));
@@ -778,19 +821,20 @@ function sceStructureBlueprint(id,count){
     for(let i=0;i<count-2;i++)middle.push(choose(f.phases[1]));
     return [first,...middle,choose(f.phases[2])];
 }
-function sceStructurePhase(pool,used){
+function sceStructurePhase(pool,used,palette='everyday'){
+    pool=sceTonePool(pool,palette);
     const fresh=pool.filter(x=>!used.includes(x)),different=pool.filter(x=>x!==used.at(-1));
     const role=pick(fresh.length?fresh:different.length?different:pool);used.push(role);return role;
 }
-function sceStructurePlan(id,count,history,antiRepeat){
+function sceStructurePlan(id,count,history,antiRepeat,palette='everyday'){
     const f=SCE_STRUCTURE_FAMILIES[id],routes=(f.routes||[]).filter(route=>route.orders[count]?.length===count);
-    if(!routes.length)return {beats:sceStructureBlueprint(id,count),routeId:null,route:null,phaseOrder:null};
+    if(!routes.length)return {beats:sceStructureBlueprint(id,count,palette),routeId:null,route:null,phaseOrder:null};
     const pool=routes.map(route=>{
         const position=antiRepeat?history.slice(0,4).findIndex(x=>x.family===id&&x.routeId===route.id):-1;
         return {value:route,weight:position<0?1:.3+.15*position};
     });
     const route=sceWeighted(pool),phaseOrder=route.orders[count].slice(),used=[];
-    return {beats:phaseOrder.map(index=>sceStructurePhase(f.phases[index],used)),routeId:route.id,route:route.label,phaseOrder};
+    return {beats:phaseOrder.map(index=>sceStructurePhase(f.phases[index],used,palette)),routeId:route.id,route:route.label,phaseOrder};
 }
 function sceStructureAttention(count,influence,history=[],antiRepeat=true){
     if(count===1)return {weights:[1],mode:'steady',label:SCE_ATTENTION_PROFILES.steady};
@@ -823,9 +867,10 @@ function sceStructuralRoll(context=sceContext(),preview=false,type='normal'){
     const s=sceStructureSettings(context);if(!sceEffective(s,'structureEnabled'))return null;
     const key=getChatKey(context),history=SCE_STRUCTURE_HISTORY.get(key)||[],signals=sceStructureSignals(context);
     const target=sceStructureTargetCount(s.beatDensity),influence=s.structureInfluence/100;
-    const pool=Object.entries(SCE_STRUCTURE_FAMILIES).filter(([id])=>s.structureWeights[id]>0).map(([id,f])=>{
+    const palette=scePalette(s),familyTone=SCE_PALETTE_FAMILY[palette]||{};
+    const pool=Object.entries(SCE_STRUCTURE_FAMILIES).filter(([id])=>s.structureWeights[id]*(familyTone[id]??1)>0).map(([id,f])=>{
         const compatible=Object.entries(f.affinity).reduce((a,[signal,w])=>a+(signals[signal]||0)*w,0);
-        let weight=s.structureWeights[id]*(1+s.structureGrounding/100*Math.min(8,compatible)*.14)/(1+Math.max(0,f.min-target));
+        let weight=s.structureWeights[id]*(familyTone[id]??1)*(1+s.structureGrounding/100*Math.min(8,compatible)*.14)/(1+Math.max(0,f.min-target));
         if(['mosaic','reverse','pivot','time','anticlimax'].includes(id))weight*=1+influence;
         if(s.structureAntiRepeat){const position=history.slice(0,4).findIndex(x=>x.family===id);
             if(position>=0)weight*=.18+.16*position;}
@@ -839,7 +884,7 @@ function sceStructuralRoll(context=sceContext(),preview=false,type='normal'){
     const f=SCE_STRUCTURE_FAMILIES[familyId],count=Math.max(f.min,Math.min(f.max,target));
     let result;
     for(let attempt=0;attempt<6;attempt++){
-        const plan=sceStructurePlan(familyId,count,history,s.structureAntiRepeat);
+        const plan=sceStructurePlan(familyId,count,history,s.structureAntiRepeat,palette);
         const attention=sceStructureAttention(count,s.structureInfluence,history,s.structureAntiRepeat);
         result={family:f.title,familyId,count,routeId:plan.routeId,route:plan.route,phaseOrder:plan.phaseOrder,
             beats:plan.beats.map((role,i)=>({role,attention:attention.weights[i]})),attention:attention.weights,
@@ -854,7 +899,7 @@ function sceStructuralRoll(context=sceContext(),preview=false,type='normal'){
     const index=context?._sceIndex||sceWordIndex(context),prior=SCE_STRUCTURE_ANCHORS.get(key)||[];
     const candidates=index.options.filter(x=>!s.structureAntiRepeat||!prior.includes(x.value)),anchors=[];
     if(index.options.length&&sceChance(s.structureGrounding))anchors.push(sceWeighted(candidates.length?candidates:index.options));
-    result.ending=pick(SCE_STRUCTURE_ENDINGS);result.anchors=anchors;
+    result.ending=pick(sceEndings(palette));result.anchors=anchors;
     if(!preview){SCE_STRUCTURE_HISTORY.set(key,[sceStructureHistoryItem(result),...history].slice(0,8));
         if(anchors.length)SCE_STRUCTURE_ANCHORS.set(key,[...anchors,...prior].slice(0,10));}
     return result;
@@ -975,34 +1020,35 @@ function sceFeedbackReportText(context=sceContext(),type='normal'){
 
 // One precedence-ordered packet. Preview and generation share this builder.
 function sceFormatPrompt(roll){
-    const lines=[];for(const x of roll?.layers||[])lines.push('Lens ['+x.title+']: '+x.instruction);
-    if(roll?.word_sparks?.length)lines.push('Optional words: '+roll.word_sparks.map(x=>'"'+x+'"').join(', '));
+    const lines=[];for(const x of roll?.layers||[])lines.push('Lens ('+x.title+'): '+x.instruction);
+    if(roll?.word_sparks?.length)lines.push('Words in play: '+roll.word_sparks.map(x=>'"'+x+'"').join(', ')+'.');
     return lines.join('\n');
 }
 function sceFormatStructure(structure){
     if(!structure)return '';
-    return ['Form: '+structure.family+' ('+structure.kind+').',
+    return ['Form: '+structure.family+', '+structure.kind+'.',
         structure.route?'Route: '+structure.route+'.':null,
         'Phases: '+structure.beats.map(x=>x.role).join(' → ')+'.',
-        'Attention: '+structure.attention.join(':')+' ('+structure.attentionLabel+'); not paragraph counts.',
+        structure.beats.length>1?'Attention: '+structure.attentionLabel:null,
         'Transition: '+structure.transition+'.'].filter(Boolean).join('\n');
 }
 function sceFormatEndingWatch(watch){
     if(!watch)return '';
-    if(watch.kind==='phrase')return 'Repeated closing wording ('+watch.count+'/'+watch.total+'): "'+watch.label.replace(/^literal closing wording: /u,'')+'". Vary the wording without forcing new events.';
-    return 'Recurring close ('+watch.count+'/'+watch.total+'): '+watch.label+'. Avoid repeating or relocating this habit unless explicitly requested or required by continuity.';
+    if(watch.kind==='phrase')return 'Repeated closing wording ('+watch.count+'/'+watch.total+'): "'+watch.label.replace(/^literal closing wording: /u,'')+'". Refresh the wording and keep the events the scene already has.';
+    return 'Recurring close ('+watch.count+'/'+watch.total+'): '+watch.label+'. Choose a different closing beat unless the user requested it or continuity requires it.';
 }
 function sceFormatCombined(roll,structure,watch=null,marker=''){
     if(!(roll?.layers?.length||roll?.word_sparks?.length||structure||watch))return '';
     const anchors=[...new Set([roll?.anchor,...(structure?.anchors||[])].filter(Boolean))].slice(0,1);
-    const lines=['[STORY CHAOS ENGINE'+(marker?' '+marker:'')+']',
-        'Preserve continuity, character knowledge, user agency and established formatting. These cues suggest possibilities, not facts.'];
+    const lines=['<scene_direction'+(marker?' id="'+marker+'"':'')+'>',
+        'Hold the scene’s established tone and intensity. Honor continuity, character knowledge, the user’s agency and established formatting.',
+        'Work the cues that fit into concrete events.'];
     if(watch)lines.push(sceFormatEndingWatch(watch));
     if(structure)lines.push(sceFormatStructure(structure));
     const creative=sceFormatPrompt(roll);if(creative)lines.push(creative);
-    if(anchors.length)lines.push('Existing context word: "'+anchors[0]+'".');
+    if(anchors.length)lines.push('Context word: "'+anchors[0]+'".');
     if(structure&&!watch)lines.push('Close: '+structure.ending);
-    lines.push('Use compatible cues in concrete events; skip conflicts. Output fiction only.','[/STORY CHAOS ENGINE]');
+    lines.push('Reply with the fiction turn only.','</scene_direction>');
     return lines.join('\n');
 }
 function sceBuildPacket(context=sceContext(),preview=false,type='normal',marker=''){
@@ -1368,7 +1414,7 @@ function sceRefreshUI(){
     const value=(id,v)=>{const el=sceNode(id);if(el)el.value=String(v);};
     const check=(id,v)=>{const el=sceNode(id);if(el)el.checked=!!v;};
     check('enabled',s.enabled&&s.mode!=='off');check('autopilot',s.autopilotEnabled);check('notify',s.notifyAfterReply);
-    value('preset',scePresetMatch(s));value('keywords',s.customKeywords);value('hidden_tags',s.hiddenTags);value('mode',s.mode);value('role',s.role);value('scope',s.contextScope);
+    value('preset',scePresetMatch(s));value('palette',s.cuePalette);value('keywords',s.customKeywords);value('hidden_tags',s.hiddenTags);value('mode',s.mode);value('role',s.role);value('scope',s.contextScope);
     check('antirepeat',s.antiRepeat);check('structure_anti_repeat',s.structureAntiRepeat);
     for(const [id,key] of SCE_UI_SLIDERS){value(id,s[key]);const out=sceNode(id+'_out');if(out)out.textContent=s[key]+(id==='layers'?'':'%');}
     for(const [id,key] of [['feedback_window','feedbackWindow'],['ending_window','endingWatchWindow'],['ending_minimum','endingWatchMinimum']])value(id,s[key]);
@@ -1392,6 +1438,7 @@ function sceBindUI(){
         if(!e.target.checked)sceCancelCurrent('Engine disabled');sceSyncTool();});
     on('autopilot','change',e=>{sceMutate(s=>{s.autopilotEnabled=e.target.checked;if(s.autopilotEnabled){s.enabled=true;s.mode='automatic';}});sceSyncTool();});
     on('apply_preset','click',()=>sceApplyPreset(sceContext(),sceNode('preset').value));
+    on('palette','change',e=>sceMutate(s=>{s.cuePalette=SCE_PALETTES.includes(e.target.value)?e.target.value:'neutral';}));
     on('keywords','input',e=>sceMutate(s=>{s.customKeywords=e.target.value.slice(0,2400);}));
     on('hidden_tags','input',e=>sceMutate(s=>{s.hiddenTags=e.target.value.slice(0,2400);}));
     on('notify','change',e=>sceMutate(s=>{s.notifyAfterReply=e.target.checked;}));
@@ -1433,6 +1480,8 @@ function sceInit(){
         '<label class="sce_line" for="sce_autopilot"><span>Autopilot</span><input type="checkbox" id="sce_autopilot"></label>'+
         '<small>Autopilot supplies defaults. Explicit feature Off overrides are always honored.</small>'+
         '<label for="sce_preset">Creative tuning</label><div class="sce_actions"><select class="text_pole" id="sce_preset"><option value="custom">Custom / current settings</option><option value="subtle">Subtle</option><option value="balanced">Balanced</option><option value="wild">Wild</option></select><button type="button" class="menu_button" id="sce_apply_preset">Apply preset</button></div>'+
+        '<label for="sce_palette">Cue palette</label><select class="text_pole" id="sce_palette"><option value="neutral">Neutral (default)</option><option value="intense">Intense</option><option value="everyday">Everyday (1.8.0 cues)</option></select>'+
+        '<small>Neutral and Intense keep the scene’s own tone and skip the Deliberate anti-climax and Elastic time structures plus the humor cues. Intense adds stakes and consequence cues. Everyday restores the 1.8.0 library.</small>'+
         '<label for="sce_keywords">Your optional keywords</label><textarea class="text_pole" id="sce_keywords" rows="3" maxlength="2400" placeholder="coffee, velvet, awkward pause"></textarea>'+
         sceSlider('keywordboost','Keyword influence')+
         '<label class="sce_line" for="sce_notify"><span>Brief verified-completion notifications</span><input type="checkbox" id="sce_notify"></label>'+

@@ -16,7 +16,7 @@ function assertDelivered(prompt,structure){
     assert.ok(prompt.includes('Form: '+structure.family),'Selected family must reach the prompt');
     assert.ok(prompt.includes('Transition: '+structure.transition),'Selected transition must reach the prompt');
     assert.ok(prompt.includes(structure.attentionLabel),'Selected attention profile must reach the prompt');
-    assert.ok(prompt.includes(structure.attention.join(':')),'Selected attention ratios must reach the prompt');
+    assert.doesNotMatch(prompt,/Attention: \d/,'Attention is delivered as prose, not numeric ratios');
     if(structure.routeId)assert.ok(prompt.includes(structure.route),'Selected route must reach the prompt');
     for(const beat of structure.beats)assert.ok(prompt.includes(beat.role),'Selected phases must reach the prompt');
 }
@@ -96,7 +96,7 @@ test('single-beat and two-beat structures have usable attention without impossib
 
 test('generic middle phases avoid adjacent duplicate roles when alternatives exist',()=>{
     for(const id of ['domino','echo','dialogue','anticlimax','reverse','time']){
-        const b=selectFamily(id);
+        const b=selectFamily(id,{cuePalette:'everyday'});
         for(let i=0;i<32;i++){
             const r=b.api.structural(b.context,true);
             for(let j=2;j<r.count-1;j++)assert.notEqual(r.beats[j].role,r.beats[j-1].role,id+' repeated the same middle instruction');
@@ -121,14 +121,14 @@ test('new routes, transitions and attention reach actual automatic and legacy gu
 
 test('maximum packets preserve delivered structure and safeguards within their word budget',()=>{
     for(const id of [...legacy,...added]){
-        const b=selectFamily(id,{autopilotEnabled:true,intensity:100,maxLayers:5,keywordBoost:100,
+        const b=selectFamily(id,{cuePalette:'everyday',autopilotEnabled:true,intensity:100,maxLayers:5,keywordBoost:100,
             customKeywords:'crimson velvet porcelain ribbon, silver lantern wooden window, amber feather copper teapot'},texted());
         for(let i=0;i<12;i++){
             const packet=b.api.packet(b.context,true);
             assertDelivered(packet.prompt,packet.structure);
             assert.ok(packet.words<=250,id+' packet contains '+packet.words+' words');
-            assert.match(packet.prompt,/Preserve continuity, character knowledge, user agency and established formatting/);
-            assert.match(packet.prompt,/not paragraph counts/);
+            assert.match(packet.prompt,/Honor continuity, character knowledge, the user’s agency and established formatting/);
+            assert.match(packet.prompt,/^Attention: [A-Z]/m);
             assert.match(packet.prompt,/Recurring close/);
             assert.doesNotMatch(packet.prompt,/^Close:/m);
         }
