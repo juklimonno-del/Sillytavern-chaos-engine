@@ -263,36 +263,127 @@ function sceFormatPrompt(roll) {
     return lines.join('\n');
 }
 
-// Invoked automatically for each non-dry-run generation by SillyTavern.
-globalThis.storyChaosEngineInterceptor = async function(_chat, _contextSize, _abort, type) {
-    const context = globalThis.SillyTavern?.getContext?.();
+/* Generation receipts: confirmation is based on SillyTavern's rendered assistant
+ * message event, not guesses about whether an LLM obeyed its creative cues. */
+const SCE_RUN_RECEIPTS = new Map();
+let sceListeningSource = null;
+function sceRunReceipt(context = globalThis.SillyTavern?.getContext?.()) {
+    return SCE_RUN_RECEIPTS.get(getChatKey(context)) || null;
+}
+function sceSetReceipt(context, receipt) {
+    const key = getChatKey(context);
+    if (receipt) SCE_RUN_RECEIPTS.set(key,receipt);
+    else SCE_RUN_RECEIPTS.delete(key);
+    if (SCE_RUN_RECEIPTS.size>12) SCE_RUN_RECEIPTS.delete(SCE_RUN_RECEIPTS.keys().next().value);
+    sceRenderReceipt(context);
+}
+function sceReceiptText(receipt) {
+    if (!receipt) return 'No generated reply checked this session.';
+    if (receipt.state==='prepared') return 'Preparing reply · guidance injected; awaiting completion.';
+    if (receipt.state==='stopped') return 'Generation stopped · no completed reply verified.';
+    if (receipt.state==='error') return 'Extension fallback · guidance unavailable for this turn.';
+    const details=[receipt.layers+' creative lens(es)'];
+    if (receipt.structure) details.push(receipt.structure);
+    if (receipt.closingHint) details.push('repetition nudge sent');
+    if (receipt.repeatLabel) details.push('recurring ending: '+receipt.repeatLabel);
+    return '✓ Reply completed, guidance delivered · '+details.join(' · ');
+}
+function sceRenderReceipt(context = globalThis.SillyTavern?.getContext?.()) {
+    if (typeof document==='undefined') return;
+    const el=document.getElementById?.('sce_run_receipt');
+    if (!el) return;
+    const receipt=sceRunReceipt(context);
+    el.textContent=sceReceiptText(receipt);
+    if (el.dataset) el.dataset.state=receipt?.state||'idle';
+}
+function sceReplyRendered(messageId,type) {
+    const context=globalThis.SillyTavern?.getContext?.();
+    if (!context || type==='first_message' || type==='impersonate') return;
+    const receipt=sceRunReceipt(context);
+    if (!receipt || receipt.state!=='prepared') return;
+    const id=Number(messageId);
+    const chat=Array.isArray(context.chat)?context.chat:[];
+    const message=chat[id];
+    if (!Number.isInteger(id) || !sceFeedbackMessageEligible(message)) return;
+    if (receipt.type==='normal' && id<receipt.startIndex) return;
+    if (receipt.type!=='normal' && id<receipt.startIndex-1) return;
+    if (type && receipt.type!==type && !(receipt.type==='normal' && type==='')) return;
+    const actual=sceFeedbackCachedFingerprint(message);
+    const repeating=sceOn(sceSettings(context),'endingWatchEnabled') ?
+        sceEndingWatch(context,'normal') : null;
+    const finished={...receipt,state:'completed',messageIndex:id,
+        words:actual.wordCount,repeatLabel:repeating?.label||null};
+    sceSetReceipt(context,finished);
+    const options=sceSettings(context);
+    if (options.notifyAfterReply && typeof globalThis.toastr?.info==='function') {
+        const summary='🎲 Guidance sent; reply completed ('+actual.wordCount+' words)' +
+            (repeating?' · recurring ending detected':'');
+        globalThis.toastr.info(summary,'Story Chaos Engine',{
+            timeOut:2400,extendedTimeOut:1000,preventDuplicates:true,progressBar:false,
+        });
+    }
+}
+function sceGenerationStopped() {
+    const context=globalThis.SillyTavern?.getContext?.();
+    const receipt=sceRunReceipt(context);
+    if (receipt?.state==='prepared') sceSetReceipt(context,{...receipt,state:'stopped'});
+}
+function sceSubscribeEvents(context) {
+    const source=context?.eventSource, types=context?.eventTypes;
+    if (!source?.on || !types || source===sceListeningSource) return;
+    if (sceListeningSource?.removeListener && sceSubscribeEvents.types) {
+        const old=sceSubscribeEvents.types;
+        sceListeningSource.removeListener(old.CHARACTER_MESSAGE_RENDERED,sceReplyRendered);
+        sceListeningSource.removeListener(old.GENERATION_STOPPED,sceGenerationStopped);
+        sceListeningSource.removeListener(old.CHAT_CHANGED,sceRenderReceipt);
+    }
+    if (types.CHARACTER_MESSAGE_RENDERED)
+        source.on(types.CHARACTER_MESSAGE_RENDERED,sceReplyRendered);
+    if (types.GENERATION_STOPPED)
+        source.on(types.GENERATION_STOPPED,sceGenerationStopped);
+    if (types.CHAT_CHANGED)
+        source.on(types.CHAT_CHANGED,sceRenderReceipt);
+    sceListeningSource=source;
+    sceSubscribeEvents.types=types;
+}
+globalThis.storyChaosEngineInterceptor = async function(_chat,_contextSize,_abort,type) {
+    const context=globalThis.SillyTavern?.getContext?.();
     if (!context?.setExtensionPrompt) return;
-
-    const options = sceSettings(context);
-    if (options.mode !== 'automatic' ||
-        ![undefined, null, '', 'normal', 'regenerate', 'swipe'].includes(type)) {
-        sceClearPrompt(context);
-        return;
+    const kind=type || 'normal';
+    try {
+        const options=sceSettings(context);
+        if (options.mode!=='automatic' ||
+            ![undefined,null,'','normal','regenerate','swipe'].includes(type)) {
+            sceClearPrompt(context);
+            const prior=sceRunReceipt(context);
+            if (prior?.state==='prepared') sceSetReceipt(context,null);
+            return;
+        }
+        const result=sceLayeredRoll(context);
+        if (sceOn(options,'structureEnabled') && sceOn(options,'feedbackObserverEnabled'))
+            sceFeedbackReconcile(context,kind);
+        const structural=sceOn(options,'structureEnabled') ?
+            sceStructuralRoll(context,false,kind) : null;
+        const endingWatch=sceOn(options,'endingWatchEnabled') ?
+            sceEndingWatch(context,kind) : null;
+        const role=options.role==='system'?0:1;
+        const prompt=sceFormatCombined(result,structural,endingWatch);
+        context.setExtensionPrompt(SCE_PROMPT_ID,prompt,1,0,false,role);
+        sceSetReceipt(context,{
+            state:'prepared',type:kind,startIndex:context.chat?.length??0,
+            layers:result.layers.length,structure:structural?.family||null,
+            closingHint:!!endingWatch,
+        });
+        if (sceOn(options,'structureEnabled') && sceOn(options,'feedbackObserverEnabled') && structural)
+            sceFeedbackPending(context,structural.familyId,kind);
+        const label=typeof document!=='undefined' && document.getElementById('sce_last_roll');
+        if (label) label.textContent='Latest roll: '+result.roll+' · '+result.creative_mode;
+        console.debug('[Story Chaos Engine] Automatic depth-0 guidance injected.');
+    } catch(error) {
+        console.error('[Story Chaos Engine] Prompt preparation failed; clearing guidance.',error);
+        try { sceClearPrompt(context); } catch(clearError) { console.error(clearError); }
+        sceSetReceipt(context,{state:'error',layers:0,structure:null,closingHint:false});
     }
-    const result = sceLayeredRoll(context);
-    if (sceOn(options, 'structureEnabled') && sceOn(options, 'feedbackObserverEnabled')) {
-        sceFeedbackReconcile(context, type || 'normal');
-    }
-    const structural = sceOn(options, 'structureEnabled') ? sceStructuralRoll(context, false, type || 'normal') : null;
-    // Ending-pattern detection is independent of Structural Entropy's
-    // statistical family balancer. It requires no matched roll history.
-    const endingWatch = sceOn(options, 'endingWatchEnabled') ?
-        sceEndingWatch(context, type || 'normal') : null;
-    // Depth 0 in a USER role keeps Gemini proxies from ending the prompt on
-    // a model turn. Users can switch to a system-role injection if preferred.
-    const role = options.role === 'system' ? 0 : 1;
-    context.setExtensionPrompt(SCE_PROMPT_ID, sceFormatCombined(result, structural, endingWatch), 1, 0, false, role);
-    if (sceOn(options, 'structureEnabled') && sceOn(options, 'feedbackObserverEnabled') && structural) {
-        sceFeedbackPending(context, structural.familyId, type || 'normal');
-    }
-    const label = typeof document !== 'undefined' && document.getElementById('sce_last_roll');
-    if (label) label.textContent = 'Latest roll: ' + result.roll + ' · ' + result.creative_mode;
-    console.debug('[Story Chaos Engine] Automatic seed injected.');
 };
 
 function sceSyncTool(context = globalThis.SillyTavern?.getContext?.()) {
@@ -1578,6 +1669,7 @@ function sceAdvancedUI(panel, config) {
 function sceInit() {
     const context = globalThis.SillyTavern?.getContext?.();
     if (!context) return;
+    sceSubscribeEvents(context);
     const settings = sceSettings(context);
     sceSyncTool(context);
     const root = typeof document !== 'undefined' && document.getElementById('extensions_settings');
