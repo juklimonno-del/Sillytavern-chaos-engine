@@ -6,9 +6,9 @@ const {boot,prepare,attachReply,finish,complete,assistant:a,user:u,texted,source
 const obj=x=>JSON.parse(JSON.stringify(x));
 const all=(defs,on=[])=>Object.fromEntries(Object.keys(defs).map(k=>[k,on.includes(k)?3:0]));
 
-test('1.7.1 manifest loads the lifecycle entry point and local-only engine',()=>{
+test('1.8.0 manifest loads the lifecycle entry point and local-only engine',()=>{
     const m=JSON.parse(fs.readFileSync(path.join(__dirname,'..','manifest.json')));
-    assert.equal(m.version,'1.7.1');assert.equal(m.js,'entry.js');assert.equal(m.hooks.disable,'onDisable');
+    assert.equal(m.version,'1.8.0');assert.equal(m.js,'entry.js');assert.equal(m.hooks.disable,'onDisable');
     assert.equal(m.generate_interceptor,'storyChaosEngineInterceptor');assert.doesNotMatch(source,/\bfetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon/);
 });
 test('existing keyword bank, weights, operating mode and role survive migration',()=>{
@@ -108,7 +108,7 @@ for(const id of ['sustained','domino','parallel','echo','dialogue','pivot','anti
         const b=boot({structureEnabled:true,beatDensity:80});b.api.settings(b.context).structureWeights=all(b.api.families,[id]);
         for(let i=0;i<20;i++){const r=b.api.structural(b.context);assert.equal(r.familyId,id);assert.equal(r.beats.length,r.count);assert.equal(r.attention.length,r.count);assert.ok(r.beats.every(x=>x.role));}
     });
-for(const size of [1,2,4,5,10])test('soft structural recency keeps '+size+' enabled families available without a forced cycle',()=>{
+for(const size of [1,2,4,5,10,18])test('soft structural recency keeps '+size+' enabled families available without a forced cycle',()=>{
     const b=boot({structureEnabled:true}),ids=Object.keys(b.api.families).slice(0,size);b.api.settings(b.context).structureWeights=all(b.api.families,ids);
     const seq=Array.from({length:100},()=>b.api.structural(b.context).familyId);assert.ok(seq.every(x=>ids.includes(x)));
     if(size>1)assert.ok(seq.slice(20).some((x,i)=>x!==seq[i+20-size]),'unexpected repeating period '+size);

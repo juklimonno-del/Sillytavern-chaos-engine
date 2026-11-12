@@ -1,7 +1,7 @@
-// Story Chaos Engine v1.7.1. Browser-only; no extra model calls or telemetry.
+// Story Chaos Engine v1.8.0. Browser-only; no extra model calls or telemetry.
 // Pure selection/analysis helpers are kept separate from the host lifecycle below.
 'use strict';
-const SCE_VERSION = '1.7.1';
+const SCE_VERSION = '1.8.0';
 const SCE_SETTINGS_KEY = 'storyChaosEngine';
 const SCE_PROMPT_ID = 'story_chaos_engine_auto';
 const SCE_FEATURES = ['structureEnabled', 'feedbackObserverEnabled', 'feedbackBalancerEnabled', 'endingWatchEnabled'];
@@ -167,12 +167,127 @@ const SCE_STRUCTURE_FAMILIES = {
         phases:[['Begin in one ongoing activity','Stay close to a small present moment'],
             ['Skip an uneventful stretch of time','Compress repeated ordinary actions'],
             ['Reveal change through a fresh detail','Return attention to what has shifted']],
-        transitions:['Unannounced short time skip','Compressed routine then close detail','Brief ellipsis']}
+        transitions:['Unannounced short time skip','Compressed routine then close detail','Brief ellipsis']},
+    resume:{title:'Interrupted task',weight:1,min:3,max:5,affinity:{action:2,consequence:1},
+        phases:[
+            ['Continue an existing task','Advance the activity already underway'],
+            ['Attend briefly to a nearby established concern','Turn briefly to another concern already present'],
+            ['Handle that concern with one small action','Give the intervening concern a practical response'],
+            ['Resume the same task with a concrete step','Return to the original activity and act'],
+            ['Move that task forward visibly','Show a concrete change in the ongoing task']
+        ],
+        transitions:['Keep the original task active','Carry relevant changes into the return'],
+        routes:[
+            {id:'early',label:'Diversion then return',orders:{3:[1,3,4],4:[0,1,3,4],5:[0,1,2,3,4]}},
+            {id:'late',label:'Progress before diversion',orders:{3:[4,1,3],4:[0,4,1,3],5:[0,4,1,2,3]}}
+        ]},
+    revision:{title:'Attempt and adjustment',weight:1,min:3,max:5,affinity:{action:2,observation:2},
+        phases:[
+            ['Try one available method','Put the current approach into practice'],
+            ['Observe what that attempt changes','Register the attempt’s actual result'],
+            ['Adjust the method using its observable result','Refine the approach in response to what happened'],
+            ['Apply the adjustment and show its immediate result','Try the revised method and show what changes'],
+            ['Continue from that result with a practical action','Carry the result into the next available step'],
+            ['Compare available methods against the current task','Briefly contrast two methods already available']
+        ],
+        transitions:['Keep the same practical goal','Let actual results guide each adjustment'],
+        routes:[
+            {id:'feedback',label:'Adjust from results',orders:{3:[0,2,3],4:[0,1,2,3],5:[0,1,2,3,4]}},
+            {id:'compare',label:'Compare before trying',orders:{4:[5,0,2,3],5:[5,0,1,2,3]}}
+        ]},
+    funnel:{title:'Narrowing choices',weight:1,min:3,max:5,affinity:{observation:2,action:1,consequence:1},
+        phases:[
+            ['Show the current practical choice','Establish a choice facing the acting character'],
+            ['Compare two already available ways forward','Contrast the practical options already present'],
+            ['Check an existing constraint in the scene','Test the options against a visible limitation'],
+            ['Narrow the options using the available evidence','Set aside an option for a concrete reason'],
+            ['Have the acting character take the selected step','Put the acting character’s chosen method into action'],
+            ['Try a small reversible step with one option','Probe one available approach through a limited action']
+        ],
+        transitions:['Keep comparisons brief and practical','Let the acting character commit through action'],
+        routes:[
+            {id:'compare',label:'Compare then commit',orders:{3:[1,3,4],4:[0,1,3,4],5:[0,1,2,3,4]}},
+            {id:'probe',label:'Try then choose',orders:{3:[5,3,4],4:[0,5,3,4],5:[0,5,2,3,4]}}
+        ]},
+    zoom:{title:'Shift of scale',weight:1,min:3,max:5,affinity:{observation:3,action:1},
+        phases:[
+            ['Attend to a concrete detail already in view','Focus closely on a visible local detail'],
+            ['Show a connected activity within the scene','Follow an activity linking the nearby details'],
+            ['Widen attention to the reachable surroundings','Take in the immediate setting around the activity'],
+            ['Narrow attention to what the acting character can use','Select a relevant detail within the current activity'],
+            ['Let that focus lead into a concrete action','Act on something established within that view']
+        ],
+        transitions:['Keep time continuous as attention shifts','Stay within the character’s accessible surroundings'],
+        routes:[
+            {id:'outward',label:'Detail to surroundings',orders:{3:[0,2,4],4:[0,1,2,4],5:[0,1,2,3,4]}},
+            {id:'inward',label:'Surroundings to detail',orders:{3:[2,0,4],4:[2,1,0,4],5:[2,1,0,3,4]}}
+        ]},
+    counterpoint:{title:'Counterpoint',weight:1,min:3,max:5,affinity:{social:2,observation:2,dialogue:1},
+        phases:[
+            ['Show one established response to the current situation','Follow one observable side of the present situation'],
+            ['Contrast two observable sides of the same situation','Set the available responses or details in contrast'],
+            ['Establish the shared practical context for a visible contrast','Show the practical concern linking two existing responses or details'],
+            ['Let the contrast affect the acting character’s next action','Have the acting character respond to that difference concretely'],
+            ['Follow the visible consequence of that action','Carry that action into an immediate practical result']
+        ],
+        transitions:['Compare material from the same situation','Keep contrasting behavior consistent with established characters'],
+        routes:[
+            {id:'reveal',label:'Contrast before shared context',orders:{3:[0,1,3],4:[0,1,2,3],5:[0,1,2,3,4]}},
+            {id:'context',label:'Shared context before contrast',orders:{3:[2,1,3],4:[2,0,1,3],5:[2,0,1,3,4]}}
+        ]},
+    relay:{title:'Handoff',weight:1,min:3,max:5,affinity:{action:2,social:1,consequence:1},
+        phases:[
+            ['Continue a task or handle an object already present','Advance work on something already in the scene'],
+            ['Pass a step to an established assistant-controlled participant or process','Transfer an available task between existing assistant-controlled participants or processes'],
+            ['Follow the visible work at the receiving stage','Show what the receiving participant or process actually does'],
+            ['Follow through on the handoff with a concrete action','Take the next available step after that transfer'],
+            ['Show the handoff’s immediate practical effect','Let the visible result of the transfer register'],
+            ['Receive the same task or object back in its current state','Bring that task or object back after the receiving stage']
+        ],
+        transitions:['Keep handoffs within established activity','Follow visible work without inventing another participant'],
+        routes:[
+            {id:'forward',label:'Transfer and follow through',orders:{3:[0,1,3],4:[0,1,2,3],5:[0,1,2,4,3]}},
+            {id:'return',label:'Transfer and receive back',orders:{3:[1,5,3],4:[0,1,5,3],5:[0,1,2,5,3]}}
+        ]},
+    accumulate:{title:'Accumulation',weight:1,min:3,max:5,affinity:{consequence:2,action:1,observation:1},
+        phases:[
+            ['Show two small contributions already possible in this situation','Bring together two available details or actions with a shared effect'],
+            ['Add another available contribution to the same situation','Let one further established detail or action contribute'],
+            ['Let an early combined effect become visible','Show how the contributions begin to add up'],
+            ['Show the contributions’ combined practical effect','Make the effect of those contributions concrete'],
+            ['Act on the combined effect visible now','Respond to that combined result with a concrete action'],
+            ['Carry one contribution further before combining the results','Follow one contributing action through before showing the whole effect']
+        ],
+        transitions:['Let separate contributions combine without forcing escalation','Keep the combined effect grounded in what actually occurred'],
+        routes:[
+            {id:'gather',label:'Gather before the combined effect',orders:{3:[0,3,4],4:[0,1,3,4],5:[0,1,5,3,4]}},
+            {id:'build',label:'Build on an early effect',orders:{4:[0,2,1,4],5:[0,2,1,3,4]}}
+        ]},
+    discovery:{title:'Evidence and response',weight:1,min:3,max:5,affinity:{observation:3,action:1},
+        phases:[
+            ['Notice an observable detail in the current scene','Attend to evidence already available to the character'],
+            ['Give one brief, provisional reading of that detail','Form a limited interpretation from what is visible'],
+            ['Check another detail the character can actually observe','Compare the interpretation with another accessible piece of evidence'],
+            ['Clarify or qualify what the visible evidence supports','Update the working interpretation without claiming unseen facts'],
+            ['Take one practical action supported by what is known','Act concretely on the evidence available now'],
+            ['Start from an interpretation the character has already expressed','Take up an assumption already established for the character']
+        ],
+        transitions:['Keep knowledge limited to accessible evidence','Retain uncertainty where the evidence remains incomplete'],
+        routes:[
+            {id:'examine',label:'Evidence before interpretation',orders:{3:[0,3,4],4:[0,2,3,4],5:[0,1,2,3,4]}},
+            {id:'check',label:'Test an established interpretation',orders:{4:[5,2,3,4],5:[5,0,2,3,4]}}
+        ]}
 };
 const SCE_STRUCTURE_ENDINGS = ['Finish on a completed small action, not a hook.',
     'Stay with the current activity as it continues.','End with a distinctive behavior or physical detail.',
     'Leave a conversation naturally ongoing without directing a question to the user.',
     'Allow a new ordinary priority to be underway.','Stop after a meaningful change; no forced cliffhanger.'];
+const SCE_LEGACY_STRUCTURE_IDS = ['sustained','domino','parallel','echo','dialogue','pivot','anticlimax','mosaic','reverse','time'];
+const SCE_ATTENTION_PROFILES = {
+    steady:'spread attention evenly',front:'linger early',back:'linger late',middle:'linger in the middle',
+    rising:'increase detail along the sequence',falling:'reduce detail along the sequence',
+    alternating:'alternate longer and shorter moments',bookends:'linger at both ends',uneven:'vary attention irregularly'
+};
 const SCE_STOP = new Set(('a about after again all already also am an and any are as at back be because '+
     'been before being between both but by can cannot could did do does doing dont down each either '+
     'else even every for from get gets getting give go going got had has have having he her here him '+
@@ -212,9 +327,16 @@ function sceSettings(context=sceContext()) {
     for(const key of ['customKeywords','hiddenTags'])s[key]=typeof s[key]==='string'?s[key].slice(0,2400):'';
     for(const key of ['feedbackWindow','endingWatchWindow'])s[key]=[4,8,16].includes(Number(s[key]))?Number(s[key]):8;
     s.endingWatchMinimum=Math.min(s.endingWatchWindow,[3,4,5].includes(Number(s.endingWatchMinimum))?Number(s.endingWatchMinimum):3);
+    // A complete disabled legacy catalog means structure was intentionally Off.
+    // New families must not turn that choice back on during migration.
+    const legacyStructureOff=sceObject(s.structureWeights)&&SCE_LEGACY_STRUCTURE_IDS.every(id=>
+        Object.hasOwn(s.structureWeights,id)&&Number(s.structureWeights[id])===0);
     for(const [field,defs] of [['categoryWeights',SCE_CATEGORIES],['structureWeights',SCE_STRUCTURE_FAMILIES]]) {
         if(!sceObject(s[field]))s[field]={};
-        for(const [id,def] of Object.entries(defs))s[field][id]=sceBound(s[field][id],def.weight,0,3);
+        for(const [id,def] of Object.entries(defs)){
+            const fallback=field==='structureWeights'&&legacyStructureOff?0:def.weight;
+            s[field][id]=sceBound(s[field][id],fallback,0,3);
+        }
     }
     if(!sceObject(s.featureOverrides))s.featureOverrides={};
     for(const key of SCE_FEATURES)if(!['auto','on','off'].includes(s.featureOverrides[key]))s.featureOverrides[key]='auto';
@@ -639,24 +761,63 @@ function sceStructureSignals(context=sceContext()){
 }
 function sceStructureTargetCount(density){const base=1+Math.round(density*4/100),jitter=density>10&&density<90?randomInt(3)-1:0;return Math.min(5,Math.max(1,base+jitter));}
 function sceStructureBlueprint(id,count){
-    const f=SCE_STRUCTURE_FAMILIES[id],first=[],middle=[],last=[];
-    if(id==='sustained')return count>1?[pick(f.phases[0]),pick(f.phases[1])]:[pick(f.phases[0])];
+    const f=SCE_STRUCTURE_FAMILIES[id],middle=[],used=[];
+    const choose=pool=>sceStructurePhase(pool,used);
+    if(id==='sustained')return count>1?[choose(f.phases[0]),choose(f.phases[1])]:[choose(f.phases[0])];
     if(id==='parallel'){
-        for(let i=0;i<count;i++)middle.push((i%2?'Thread B: ':'Thread A: ')+pick(f.phases[i%2]));
-        if(count>=4&&sceChance(30))middle[middle.length-1]=pick(f.phases[2]);return middle;
+        for(let i=0;i<count;i++)middle.push((i%2?'Thread B: ':'Thread A: ')+choose(f.phases[i%2]));
+        if(count>=4&&sceChance(30))middle[middle.length-1]=choose(f.phases[2]);return middle;
     }
-    if(id==='mosaic'){for(let i=0;i<count;i++)middle.push(pick(f.phases[i%f.phases.length]));return middle;}
+    if(id==='mosaic'){for(let i=0;i<count;i++)middle.push(choose(f.phases[i%f.phases.length]));return middle;}
     if(id==='pivot'){
         const turn=1+randomInt(Math.max(1,count-1));
-        for(let i=0;i<count;i++)middle.push(pick(f.phases[i<turn?0:i===turn?1:2]));return middle;
+        for(let i=0;i<count;i++)middle.push(choose(f.phases[i<turn?0:i===turn?1:2]));return middle;
     }
-    first.push(pick(f.phases[0]));for(let i=0;i<count-2;i++)middle.push(pick(f.phases[1]));last.push(pick(f.phases[2]));
-    if(count===2)return id==='domino'?[first[0],last[0]]:[first[0],pick(f.phases[1])];
-    return [...first,...middle,...last];
+    const first=choose(f.phases[0]);
+    if(count===2)return [first,choose(f.phases[id==='domino'?2:1])];
+    for(let i=0;i<count-2;i++)middle.push(choose(f.phases[1]));
+    return [first,...middle,choose(f.phases[2])];
 }
-function sceStructureAttention(count,influence){
-    const spread=Math.max(1,Math.ceil(influence/25)),w=Array.from({length:count},()=>1+randomInt(spread+1));
-    if(w.length>1&&w.every(x=>x===w[0])){const i=randomInt(count);w[i]=w[i]===1?2:w[i]-1;}return w;
+function sceStructurePhase(pool,used){
+    const fresh=pool.filter(x=>!used.includes(x)),different=pool.filter(x=>x!==used.at(-1));
+    const role=pick(fresh.length?fresh:different.length?different:pool);used.push(role);return role;
+}
+function sceStructurePlan(id,count,history,antiRepeat){
+    const f=SCE_STRUCTURE_FAMILIES[id],routes=(f.routes||[]).filter(route=>route.orders[count]?.length===count);
+    if(!routes.length)return {beats:sceStructureBlueprint(id,count),routeId:null,route:null,phaseOrder:null};
+    const pool=routes.map(route=>{
+        const position=antiRepeat?history.slice(0,4).findIndex(x=>x.family===id&&x.routeId===route.id):-1;
+        return {value:route,weight:position<0?1:.3+.15*position};
+    });
+    const route=sceWeighted(pool),phaseOrder=route.orders[count].slice(),used=[];
+    return {beats:phaseOrder.map(index=>sceStructurePhase(f.phases[index],used)),routeId:route.id,route:route.label,phaseOrder};
+}
+function sceStructureAttention(count,influence,history=[],antiRepeat=true){
+    if(count===1)return {weights:[1],mode:'steady',label:SCE_ATTENTION_PROFILES.steady};
+    const available=Object.keys(SCE_ATTENTION_PROFILES).filter(id=>count>=3||!['middle','bookends'].includes(id));
+    const mode=sceWeighted(available.map(id=>{
+        const position=antiRepeat?history.slice(0,3).findIndex(x=>x.attentionMode===id):-1;
+        return {value:id,weight:position<0?1:.35+.2*position};
+    }));
+    const spread=Math.max(1,Math.ceil(influence/25)),peak=1+spread;
+    let weights=Array.from({length:count},(_,i)=>{
+        if(mode==='front')return i===0?peak:1;
+        if(mode==='back')return i===count-1?peak:1;
+        if(mode==='middle')return i===Math.floor(count/2)?peak:1;
+        if(mode==='rising')return 1+Math.round(spread*i/(count-1));
+        if(mode==='falling')return 1+Math.round(spread*(count-1-i)/(count-1));
+        if(mode==='alternating')return i%2===0?peak:1;
+        if(mode==='bookends')return i===0||i===count-1?peak:1;
+        if(mode==='uneven')return 1+randomInt(spread+1);
+        return 1;
+    });
+    if(mode==='uneven'&&weights.every(x=>x===weights[0])){
+        const i=randomInt(count);weights[i]=weights[i]===1?peak:1;
+    }
+    return {weights,mode,label:SCE_ATTENTION_PROFILES[mode]};
+}
+function sceStructureHistoryItem(structure){
+    return {family:structure.familyId,signature:structure.signature,routeId:structure.routeId,attentionMode:structure.attentionMode};
 }
 function sceStructuralRoll(context=sceContext(),preview=false,type='normal'){
     const s=sceStructureSettings(context);if(!sceEffective(s,'structureEnabled'))return null;
@@ -676,20 +837,25 @@ function sceStructuralRoll(context=sceContext(),preview=false,type='normal'){
     }
     const familyId=sceWeighted(pool);if(!familyId)return null;
     const f=SCE_STRUCTURE_FAMILIES[familyId],count=Math.max(f.min,Math.min(f.max,target));
-    let beats,attention,transition,ending,signature;
+    let result;
     for(let attempt=0;attempt<6;attempt++){
-        beats=sceStructureBlueprint(familyId,count);attention=sceStructureAttention(count,s.structureInfluence);
-        transition=pick(f.transitions);ending=pick(SCE_STRUCTURE_ENDINGS);
-        signature=[familyId,count,attention.join('-'),transition,ending,beats.join('|')].join(':');
-        if(!s.structureAntiRepeat||!history.some(x=>x.signature===signature))break;
+        const plan=sceStructurePlan(familyId,count,history,s.structureAntiRepeat);
+        const attention=sceStructureAttention(count,s.structureInfluence,history,s.structureAntiRepeat);
+        result={family:f.title,familyId,count,routeId:plan.routeId,route:plan.route,phaseOrder:plan.phaseOrder,
+            beats:plan.beats.map((role,i)=>({role,attention:attention.weights[i]})),attention:attention.weights,
+            attentionMode:attention.mode,attentionLabel:attention.label,transition:pick(f.transitions),
+            influence:s.structureInfluence,grounding:s.structureGrounding,
+            kind:s.structureInfluence>=80?'strong execution':s.structureInfluence>=50?'moderate execution':'gentle execution'};
+        // Measure the structure actually emitted. Run IDs, hidden choices, and a
+        // closing cue suppressed by a correction do not create apparent novelty.
+        result.signature=sceFormatStructure(result);
+        if(!s.structureAntiRepeat||!history.some(x=>x.signature===result.signature))break;
     }
     const index=context?._sceIndex||sceWordIndex(context),prior=SCE_STRUCTURE_ANCHORS.get(key)||[];
     const candidates=index.options.filter(x=>!s.structureAntiRepeat||!prior.includes(x.value)),anchors=[];
     if(index.options.length&&sceChance(s.structureGrounding))anchors.push(sceWeighted(candidates.length?candidates:index.options));
-    const result={family:f.title,familyId,count,beats:beats.map((role,i)=>({role,attention:attention[i]})),attention,
-        transition,ending,anchors,signature,influence:s.structureInfluence,grounding:s.structureGrounding,
-        kind:s.structureInfluence>=80?'strong execution':s.structureInfluence>=50?'moderate execution':'gentle execution'};
-    if(!preview){SCE_STRUCTURE_HISTORY.set(key,[{family:familyId,signature},...history].slice(0,8));
+    result.ending=pick(SCE_STRUCTURE_ENDINGS);result.anchors=anchors;
+    if(!preview){SCE_STRUCTURE_HISTORY.set(key,[sceStructureHistoryItem(result),...history].slice(0,8));
         if(anchors.length)SCE_STRUCTURE_ANCHORS.set(key,[...anchors,...prior].slice(0,10));}
     return result;
 }
@@ -816,8 +982,10 @@ function sceFormatPrompt(roll){
 function sceFormatStructure(structure){
     if(!structure)return '';
     return ['Form: '+structure.family+' ('+structure.kind+').',
+        structure.route?'Route: '+structure.route+'.':null,
         'Phases: '+structure.beats.map(x=>x.role).join(' → ')+'.',
-        'Attention: '+structure.attention.join(':')+'; not paragraph counts.'].join('\n');
+        'Attention: '+structure.attention.join(':')+' ('+structure.attentionLabel+'); not paragraph counts.',
+        'Transition: '+structure.transition+'.'].filter(Boolean).join('\n');
 }
 function sceFormatEndingWatch(watch){
     if(!watch)return '';
@@ -856,8 +1024,8 @@ function sceCommitPacketHistory(context,p){
     sceRecentCueHistory.set(key,[...p.creative.layers.map(x=>x.id+':'+x.instruction),...old].slice(0,15));
     const d=p.creative.layers.find(x=>x.id==='direction');if(d)recentModes.set(key,[d.instruction,...(recentModes.get(key)||[])].slice(0,6));
     if(p.creative.anchor)sceRecentAnchorHistory.set(key,[p.creative.anchor,...(sceRecentAnchorHistory.get(key)||[])].slice(0,5));
-    if(p.structure){const signature=p.structure.signature;
-        SCE_STRUCTURE_HISTORY.set(key,[{family:p.structure.familyId,signature},...(SCE_STRUCTURE_HISTORY.get(key)||[])].slice(0,8));
+    if(p.structure){
+        SCE_STRUCTURE_HISTORY.set(key,[sceStructureHistoryItem(p.structure),...(SCE_STRUCTURE_HISTORY.get(key)||[])].slice(0,8));
         if(p.structure.anchors.length)SCE_STRUCTURE_ANCHORS.set(key,[...p.structure.anchors,...(SCE_STRUCTURE_ANCHORS.get(key)||[])].slice(0,10));}
 }
 
@@ -1170,7 +1338,7 @@ function sceStructureUI(panel){
     section.innerHTML='<summary>Structural Entropy</summary><div class="sce_stack">'+sceFeatureControl('structureEnabled','Structural guidance')+
         sceSlider('structure_influence','Structure influence')+sceSlider('structure_density','Beat density')+sceSlider('structure_grounding','Context grounding')+
         '<label class="sce_line" for="sce_structure_anti_repeat"><span>Discourage recently used structures</span><input type="checkbox" id="sce_structure_anti_repeat"></label>'+
-        '<small>Soft recency penalties preserve variety without forcing a repeating family rotation.</small>'+
+        '<small>'+Object.keys(SCE_STRUCTURE_FAMILIES).length+' families with automatic route and attention variation. Soft recency penalties avoid a forced rotation; attention ratios do not set paragraph counts.</small>'+
         '<details class="sce_group"><summary>Structure family weights</summary>'+sceWeightControls(SCE_STRUCTURE_FAMILIES,'structure_')+'</details></div>';
     panel.querySelector('.sce_main_body')?.appendChild(section);
 }
