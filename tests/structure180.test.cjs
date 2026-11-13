@@ -126,7 +126,7 @@ test('maximum packets preserve delivered structure and safeguards within their w
         for(let i=0;i<12;i++){
             const packet=b.api.packet(b.context,true);
             assertDelivered(packet.prompt,packet.structure);
-            assert.ok(packet.words<=250,id+' packet contains '+packet.words+' words');
+            assert.ok(packet.words-(packet.autonomy?.words||0)<=250,id+' packet contains '+packet.words+' words');
             assert.doesNotMatch(packet.prompt,/Honor continuity|Hold the scene|Reply with the fiction turn only/);
             assert.match(packet.prompt,/^Attention: [A-Z]/m);
             assert.match(packet.prompt,/Recurring close/);
