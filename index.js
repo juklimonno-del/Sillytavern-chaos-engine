@@ -1,7 +1,7 @@
 // Story Chaos Engine v1.8.4. Browser-only; no extra model calls or telemetry.
 // Pure selection/analysis helpers are kept separate from the host lifecycle below.
 'use strict';
-const SCE_VERSION = '1.8.4';
+const SCE_VERSION = '1.9.0';
 const SCE_SETTINGS_KEY = 'storyChaosEngine';
 const SCE_PROMPT_ID = 'story_chaos_engine_auto';
 const SCE_FEATURES = ['structureEnabled', 'feedbackObserverEnabled', 'feedbackBalancerEnabled', 'endingWatchEnabled'];
@@ -449,6 +449,8 @@ function sceSettings(context=sceContext()) {
     if(!['user','system'].includes(s.role))s.role='user';
     for(const [key,value] of Object.entries({...SCE_ADV_DEFAULTS,...SCE_STRUCTURE_DEFAULTS,...SCE_FEEDBACK_DEFAULTS,...SCE_ENDING_WATCH_DEFAULTS}))
         if(s[key]===undefined)s[key]=value;
+    // Autonomy ships on, including for settings saved before 1.9.0.
+    if(typeof s.autonomyEnabled!=='boolean')s.autonomyEnabled=SCE_AUTONOMY_DEFAULTS.autonomyEnabled;
     for(const key of [...SCE_FEATURES,'antiRepeat','structureAntiRepeat','autopilotEnabled'])
         if(typeof s[key]!=='boolean')s[key]=['antiRepeat','structureAntiRepeat'].includes(key);
     if(typeof s.notifyAfterReply!=='boolean')s.notifyAfterReply=true;
@@ -906,6 +908,172 @@ function sceShapeWatch(context=sceContext(),type='normal',closingWatchActive=fal
     if(clean.every(x=>share(x)>.6))found.push({trait:'narration',text:'Let action and description carry this reply, with little speech.'});
     return found.length?pick(found):null;
 }
+// Character autonomy (1.9.0). The model writes a compact <sce_tracker> ledger after each reply.
+// State is always derived from the surviving chat, never stored separately, so swipes, edits,
+// deletions and branches roll it back for free, and editing a tracker by hand edits the state.
+// The user's own persona is never tracked or driven.
+const SCE_AUTONOMY_DEFAULTS = {autonomyEnabled:true};
+const SCE_AUTONOMY_WINDOW = 12;
+const SCE_AUTONOMY_MAX_ACTORS = 6;
+const SCE_AUTONOMY_FIELD_MAX = 160;
+const SCE_DRIVE_CHANCE = {off:.3,low:.45,medium:.6,high:.75,max:.9};
+const SCE_TRACKER_BLOCK = /<sce_tracker\b[^>]*>([\s\S]*?)(?:<\/sce_tracker\s*>|$)|\[sce_tracker\]([\s\S]*?)(?:\[\/sce_tracker\]|$)/giu;
+const SCE_TRACKER_STRIP = /\s*(?:<sce_tracker\b[^>]*>[\s\S]*?(?:<\/sce_tracker\s*>|$)|\[sce_tracker\][\s\S]*?(?:\[\/sce_tracker\]|$))/giu;
+// Wants that exist to please, keep or serve the user. Hostile or independent wants that merely name the user are fine.
+const SCE_USER_SERVING = /\b(?:please|pleasing|satisfy|serve|obey|impress|win\s+(?:over|back)|be\s+with|stay\s+(?:with|close|near|by)|be\s+(?:near|close\s+to)|belong|keep\s+\S+\s+(?:happy|close|safe|around)|make\s+\S+(?:\s+\S+)?\s+(?:happy|smile|comfortable|proud)|approv\w*|loved?\s+by|liked?\s+by|noticed\s+by|comfort|reassure|help|support|protect|devot\w*|submit|surrender\s+to|earn\s+\S+\s+(?:trust|love|respect))\b/iu;
+const SCE_AUTONOMY_LEDGER_CACHE = new WeakMap();
+const SCE_DRIVE_HISTORY = new SceBoundedMap();
+
+function sceAutonomyOn(s){return !!(s?.enabled&&s.mode!=='off'&&s.autonomyEnabled);}
+function sceUserName(context){const n=typeof context?.name1==='string'?context.name1.trim():'';return n&&n.length<=80?n:'the user';}
+// Packets pass through the host's macro substitution, so model-written braces are neutralized.
+function sceTrackerClip(text){return String(text).replace(/\{\{|\}\}/gu,'').replace(/\s+/gu,' ').replace(/^["“'*_\s]+|["”'*_\s]+$/gu,'').trim().slice(0,SCE_AUTONOMY_FIELD_MAX);}
+function sceTrackerNumber(text,lo,hi){
+    const m=String(text).replace(/[−–—]/gu,'-').match(/([+-]?\d+)\s*(?:\/\s*\d+)?\s*\)?\s*$/u);
+    if(!m)return {word:sceTrackerClip(text),value:null};
+    const value=Math.max(lo,Math.min(hi,Number(m[1])));
+    return {word:sceTrackerClip(String(text).slice(0,m.index).replace(/[(:,\s]+$/u,'')),value};
+}
+function sceTrackerKey(raw,user){
+    const k=raw.toLowerCase().replace(/[*_]/gu,'').trim();
+    if(/^(?:toward|towards|stance|regard)\b/u.test(k))return 'toward';
+    if(/^(?:mood)\b/u.test(k))return 'mood';
+    if(/^(?:feels?|feeling)\b/u.test(k))return 'feels';
+    if(/^(?:wants?)\b/u.test(k))return 'want';
+    if(/^(?:desires?|goal)\b/u.test(k))return 'desire';
+    if(/^(?:thinks?|thought)\b/u.test(k))return 'thinks';
+    return user&&k===user.toLowerCase()?'toward':null;
+}
+function sceSameName(a,b){return String(a).trim().toLowerCase()===String(b).trim().toLowerCase();}
+function sceParseTracker(text,user='the user'){
+    const raw=String(text??'');let body=null;
+    for(const m of raw.matchAll(SCE_TRACKER_BLOCK))body=m[1]??m[2]??'';
+    if(body==null)return null;
+    const actors=[];
+    for(const line of body.split(/\n+/u)){
+        const parts=line.split('|');if(parts.length<2)continue;
+        const name=sceTrackerClip(parts[0].replace(/^\s*(?:[-*•]+\s*)?/u,'')).slice(0,80);
+        if(!name||name.length<2||sceSameName(name,user)||/^\{\{user\}\}$/iu.test(name)||/^name$/iu.test(name))continue;
+        if(actors.some(x=>sceSameName(x.name,name)))continue;
+        const entry={name};
+        for(const part of parts.slice(1)){
+            const at=part.indexOf(':');if(at<0)continue;
+            const key=sceTrackerKey(part.slice(0,at),user),value=part.slice(at+1).trim();
+            if(!key||!value||entry[key]!==undefined)continue;
+            if(key==='mood'){const n=sceTrackerNumber(value,1,5);entry.mood=n.word||null;entry.moodLevel=n.value;}
+            else if(key==='toward'){const n=sceTrackerNumber(value,-3,3);entry.toward=n.word||null;entry.towardLevel=n.value;}
+            else entry[key]=sceTrackerClip(value);
+        }
+        if(Object.keys(entry).length>1)actors.push(entry);
+        if(actors.length>=SCE_AUTONOMY_MAX_ACTORS)break;
+    }
+    return actors.length?actors:null;
+}
+function sceStripTracker(text){return String(text??'').replace(SCE_TRACKER_STRIP,'').replace(/\s+$/u,'');}
+function sceMessageLedger(message,user){
+    const raw=String(message?.mes??''),hit=SCE_AUTONOMY_LEDGER_CACHE.get(message);
+    if(hit&&hit.raw===raw&&hit.user===user)return hit.ledger;
+    const ledger=sceParseTracker(raw,user);
+    if(message&&typeof message==='object')SCE_AUTONOMY_LEDGER_CACHE.set(message,{raw,user,ledger});
+    return ledger;
+}
+// Oldest → newest list of ledgers from surviving, eligible replies. A swipe's replaced reply is excluded.
+function sceLedgerHistory(context=sceContext(),type='normal'){
+    const user=sceUserName(context);
+    return sceFeedbackReplyEntries(context,SCE_AUTONOMY_WINDOW,type).map(x=>sceMessageLedger(x.message,user)).filter(Boolean);
+}
+function sceNorm(text){return String(text??'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();}
+function sceActorTrail(history,name){return history.map(l=>l.find(a=>sceSameName(a.name,name))).filter(Boolean);}
+function sceUserServing(text,user){
+    if(!text)return false;
+    const names=[user,'{{user}}'].filter(x=>x&&x!=='the user').map(sceRegexEscape);
+    const mentions=names.length?new RegExp('(?:^|[^\\p{L}\\p{N}])(?:'+names.join('|')+')(?![\\p{L}\\p{N}])','iu').test(text):false;
+    return mentions&&SCE_USER_SERVING.test(text);
+}
+function sceAutonomyGuards(history,user){
+    const latest=history.at(-1)||[],guards=[];
+    for(const actor of latest){
+        const trail=sceActorTrail(history,actor.name),q=x=>'"'+x+'"';
+        if(sceUserServing(actor.want,user)||sceUserServing(actor.desire,user))
+            guards.push({kind:'self',name:actor.name,text:'Want ('+actor.name+'): it has narrowed to '+user+'. Give '+actor.name+' a want rooted in their own life, and let it pull against '+user+'.'});
+        const levels=trail.map(x=>x.towardLevel).filter(Number.isFinite).slice(-6);
+        const rising=levels.length>=4&&levels.every((v,i)=>i===0||v>=levels[i-1])&&levels.at(-1)-levels[0]>=2;
+        const pinned=levels.length>=4&&levels.slice(-4).every(v=>v===3);
+        if(rising||pinned)guards.push({kind:'stance',name:actor.name,text:'Stance ('+actor.name+'): their regard for '+user+' has only warmed for '+levels.length+' replies. Something cools it this turn: a doubt, a cost, or a line they will not cross.'});
+        const desires=trail.map(x=>x.desire).filter(Boolean);
+        if(desires.length>=2&&sceNorm(desires.at(-1))!==sceNorm(desires.at(-2)))
+            guards.push({kind:'desire',name:actor.name,text:'Desire ('+actor.name+'): it changed from '+q(desires.at(-2))+' to '+q(desires.at(-1))+'. Put the cause on the page, or return to '+q(desires.at(-2))+'.'});
+        if(actor.want){
+            let streak=0;for(let i=trail.length-1;i>=0&&sceNorm(trail[i].want)===sceNorm(actor.want);i--)streak++;
+            if(streak>=4)guards.push({kind:'stall',name:actor.name,text:'Stall ('+actor.name+'): '+q(actor.want)+' has gone unmet for '+streak+' replies. '+actor.name+' escalates, changes approach, or drops it for something new.'});
+        }
+    }
+    const order={self:0,stance:1,desire:2,stall:3};
+    return guards.sort((a,b)=>order[a.kind]-order[b.kind]).slice(0,2);
+}
+const SCE_DRIVES = [
+    {id:'initiative',needs:['want'],text:a=>a.name+' moves on '+'"'+a.want+'" this turn without waiting to be asked, even if it costs something.'},
+    {id:'conflict',needs:['want','desire'],text:a=>a.name+'’s want ("'+a.want+'") and desire ("'+a.desire+'") pull apart; '+a.name+' chooses one, visibly, and pays for it.'},
+    {id:'conceal',needs:['thinks'],text:a=>a.name+' keeps this unsaid: "'+a.thinks+'". It shows in what they do, never in what they say.'},
+    {id:'counter',needs:[],text:a=>a.name+'’s mood moves against the direction of the scene this turn.'},
+    {id:'offscreen',needs:[],text:a=>a.name+'’s own agenda advanced while no one was watching; something already in motion surfaces now.'},
+    {id:'leverage',needs:['want'],text:(a,user)=>'If '+user+'’s last move cuts against "'+a.want+'", '+a.name+' resists, bargains or names a price instead of going along.'},
+    {id:'fracture',needs:['desire'],max:true,text:a=>'"'+a.desire+'" cracks, or proves to be cover for something '+a.name+' wants more.'}
+];
+function sceDriveRoll(actors,s,recent=[],user='the user'){
+    const level=sceDisruptionLevel(s),chance=SCE_DRIVE_CHANCE[level]??.75;
+    if(!actors.length||!sceChance(chance*100))return [];
+    const count=actors.length>=2&&sceChance(35)?2:1,chosen=[],pool=[...actors],drives=[];
+    while(chosen.length<count&&pool.length)chosen.push(pool.splice(randomInt(pool.length),1)[0]);
+    for(const actor of chosen){
+        const fit=SCE_DRIVES.filter(d=>(!d.max||level==='max')&&d.needs.every(k=>actor[k])&&!drives.some(x=>x.id===d.id));
+        const fresh=s.antiRepeat?fit.filter(d=>!recent.includes(d.id)):fit,d=pick(fresh.length?fresh:fit);
+        if(d)drives.push({id:d.id,name:actor.name,text:'Drive ('+actor.name+'): '+d.text(actor,user)});
+    }
+    return drives;
+}
+function sceStateLine(a,user){
+    const bits=[a.mood?'mood: '+a.mood+(Number.isFinite(a.moodLevel)?' '+a.moodLevel:''):null,a.want?'want: '+a.want:null,a.desire?'desire: '+a.desire:null,
+        a.toward?'toward '+user+': '+a.toward+(Number.isFinite(a.towardLevel)?' '+(a.towardLevel>0?'+':'')+a.towardLevel:''):
+            Number.isFinite(a.towardLevel)?'toward '+user+': '+(a.towardLevel>0?'+':'')+a.towardLevel:null].filter(Boolean);
+    return 'State ('+a.name+'): '+bits.join(' · ')+'.';
+}
+function sceTrackerInstruction(user,continuing=false){
+    return (continuing?'Ledger: continue the reply from where it stops, then end it with a fresh <sce_tracker>':'Ledger: after the reply, write <sce_tracker>')+', one line per character present except '+user+
+        ' — Name | mood: word 1-5 | feels: feeling → target | want: their goal in this scene | desire: their own long goal | toward '+user+': word -3 to +3 | thinks: one private line — then </sce_tracker>.';
+}
+function sceAutonomyRoll(context=sceContext(),type='normal'){
+    const s=context?._sceSettings||sceSettings(context);
+    if(!sceAutonomyOn(s))return null;
+    const user=sceUserName(context),history=sceLedgerHistory(context,type),latest=history.at(-1)||[];
+    const lines=[];
+    if(!latest.length)lines.push('State: no ledger yet. Each character’s want and desire come from their own life and what they were doing before '+user+' arrived, not from '+user+'.');
+    else for(const actor of latest.slice(0,3))lines.push(sceStateLine(actor,user));
+    const guards=sceAutonomyGuards(history,user);
+    const drives=sceDriveRoll(latest,s,SCE_DRIVE_HISTORY.get(getChatKey(context))||[],user);
+    for(const g of guards)lines.push(g.text);
+    for(const d of drives)lines.push(d.text);
+    lines.push(sceTrackerInstruction(user));
+    return {lines,guards,drives,actors:latest.map(a=>a.name),words:lines.join(' ').split(/\s+/u).length};
+}
+// Continue mode. The host saves a continuation as (outgoing last message + new text), so stripping the
+// tracker from the outgoing copy drops the old ledger from the saved reply and the model ends it with a fresh one.
+// No lenses, breaks or drives: a continuation finishes the turn already in progress.
+function sceContinuePacket(context=sceContext(),marker=''){
+    const s=sceSettings(context);if(!sceAutonomyOn(s))return '';
+    const user=sceUserName(context),latest=sceLedgerHistory(context,'continue').at(-1)||[];
+    return ['<scene_direction'+(marker?' id="'+marker+'"':'')+'>',...latest.slice(0,3).map(a=>sceStateLine(a,user)),
+        sceTrackerInstruction(user,true),'</scene_direction>'].join('\n');
+}
+function sceAutonomyStripChat(chat,s){
+    if(!Array.isArray(chat)||!sceAutonomyOn(s))return 0;let n=0;
+    for(let i=0;i<chat.length;i++){
+        const m=chat[i];if(!m||m.is_user!==false||typeof m.mes!=='string'||!/sce_tracker/iu.test(m.mes))continue;
+        // Current hosts already pass per-request copies; replacing the slot keeps older hosts' saved messages safe too.
+        chat[i]={...m,mes:sceStripTracker(m.mes)};n++;
+    }
+    return n;
+}
 function sceStructureSettings(context=sceContext()){return context?._sceSettings||sceSettings(context);}
 function sceStructureSignals(context=sceContext()){
     const s=context?._sceSettings||sceSettings(context);
@@ -1154,8 +1322,8 @@ function sceFormatEndingWatch(watch){
     if(watch.kind==='phrase')return 'Repeated closing wording ('+watch.count+'/'+watch.total+'): "'+watch.label.replace(/^literal closing wording: /u,'')+'". Refresh the wording and keep the events the scene already has.';
     return 'Recurring close ('+watch.count+'/'+watch.total+'): '+watch.label+'. Choose a different closing beat unless the user requested it or continuity requires it.';
 }
-function sceFormatCombined(roll,structure,watch=null,marker='',shape=null){
-    if(!(roll?.layers?.length||roll?.word_sparks?.length||roll?.disruption||structure||watch||shape))return '';
+function sceFormatCombined(roll,structure,watch=null,marker='',shape=null,autonomy=null){
+    if(!(roll?.layers?.length||roll?.word_sparks?.length||roll?.disruption||structure||watch||shape||autonomy?.lines?.length))return '';
     const anchors=[...new Set([roll?.anchor,...(structure?.anchors||[])].filter(Boolean))].slice(0,1);
     const lines=['<scene_direction'+(marker?' id="'+marker+'"':'')+'>'];
     if(watch)lines.push(sceFormatEndingWatch(watch));
@@ -1165,6 +1333,7 @@ function sceFormatCombined(roll,structure,watch=null,marker='',shape=null){
     const creative=sceFormatPrompt(roll);if(creative)lines.push(creative);
     if(anchors.length)lines.push('Context word: "'+anchors[0]+'".');
     if(structure&&!watch)lines.push('Close: '+structure.ending);
+    if(autonomy?.lines?.length)lines.push(...autonomy.lines);
     lines.push('</scene_direction>');
     return lines.join('\n');
 }
@@ -1176,9 +1345,11 @@ function sceBuildPacket(context=sceContext(),preview=false,type='normal',marker=
     const warning=sceEndingWatch(snapshot,type);
     // Soft caps are applied to choices, never by truncating continuity or agency instructions.
     const shape=sceShapeWatch(snapshot,type,!!warning);
-    let prompt=sceFormatCombined(creative,structure,warning,marker,shape);
-    while(prompt.split(/\s+/u).length>250&&creative.layers.length>1){creative.layers.pop();prompt=sceFormatCombined(creative,structure,warning,marker,shape);}
-    const packet={prompt,creative,structure,warning,shape,settings:s,snapshot,words:prompt?prompt.trim().split(/\s+/u).length:0};
+    // Autonomy lines carry their own budget so the ledger never squeezes out the creative lenses.
+    const autonomy=sceAutonomyRoll(snapshot,type),allowance=250+(autonomy?.words||0);
+    let prompt=sceFormatCombined(creative,structure,warning,marker,shape,autonomy);
+    while(prompt.split(/\s+/u).length>allowance&&creative.layers.length>1){creative.layers.pop();prompt=sceFormatCombined(creative,structure,warning,marker,shape,autonomy);}
+    const packet={prompt,creative,structure,warning,shape,autonomy,settings:s,snapshot,words:prompt?prompt.trim().split(/\s+/u).length:0};
     if(!preview)sceCommitPacketHistory(context,packet);
     return packet;
 }
@@ -1186,6 +1357,7 @@ function structuredCloneSafe(value){return typeof structuredClone==='function'?s
 function sceCommitPacketHistory(context,p){
     const key=getChatKey(context),old=sceRecentCueHistory.get(key)||[];
     sceRecentCueHistory.set(key,[...(p.creative.disruption?['disruption:'+p.creative.disruption.instruction]:[]),...p.creative.layers.map(x=>x.id+':'+x.instruction),...old].slice(0,15));
+    if(p.autonomy?.drives?.length)SCE_DRIVE_HISTORY.set(key,[...p.autonomy.drives.map(x=>x.id),...(SCE_DRIVE_HISTORY.get(key)||[])].slice(0,4));
     const d=p.creative.layers.find(x=>x.id==='direction');if(d)recentModes.set(key,[d.instruction,...(recentModes.get(key)||[])].slice(0,6));
     if(p.creative.anchor)sceRecentAnchorHistory.set(key,[p.creative.anchor,...(sceRecentAnchorHistory.get(key)||[])].slice(0,5));
     if(p.structure){
@@ -1408,11 +1580,17 @@ function sceUnsubscribeEvents(){
     for(const [event,fn] of sceListeners){if(sceListeningSource?.removeListener)sceListeningSource.removeListener(event,fn);else sceListeningSource?.off?.(event,fn);}
     sceListeners=[];sceListeningSource=null;
 }
-globalThis.storyChaosEngineInterceptor=async function(_chat,_contextSize,_abort,type){
+globalThis.storyChaosEngineInterceptor=async function(chat,_contextSize,_abort,type){
     const context=sceContext();if(!context?.setExtensionPrompt)return;
     try{
         const settings=sceSettings(context),kind=type||'normal';
         sceSubscribeEvents(context);
+        if(kind==='continue'&&sceRuntimeEnabled&&settings.enabled&&settings.mode==='automatic'&&sceAutonomyOn(settings)){
+            const prompt=sceContinuePacket(context,'SCE-'+(++sceRunCounter)+'-'+randomInt(1000000));
+            sceAutonomyStripChat(chat,settings);
+            context.setExtensionPrompt(SCE_PROMPT_ID,prompt,1,0,false,settings.role==='system'?0:1);
+            return;
+        }
         if(!sceRuntimeEnabled||!settings.enabled||settings.mode!=='automatic'||!['normal','regenerate','swipe'].includes(kind)){
             sceSafeClear(context);return;
         }
@@ -1424,9 +1602,11 @@ globalThis.storyChaosEngineInterceptor=async function(_chat,_contextSize,_abort,
         const prior=kind==='swipe'?context.chat?.[targetIndex]:null;
         const id='SCE-'+(++sceRunCounter)+'-'+randomInt(1000000);
         const packet=sceBuildPacket(context,true,kind,id);
+        // Old ledgers leave the outgoing history; the newest state rides in the packet instead.
+        sceAutonomyStripChat(chat,packet.settings);
         // Preparation is synchronous. One atomic replacement, or a clear in the failure handler.
         context.setExtensionPrompt(SCE_PROMPT_ID,packet.prompt,1,0,false,settings.role==='system'?0:1);
-        const run={id,key:getChatKey(context),type:kind,started,targetIndex,state:'prepared',prompt:packet.prompt,packet:{creative:packet.creative,structure:packet.structure},
+        const run={id,key:getChatKey(context),type:kind,started,targetIndex,state:'prepared',prompt:packet.prompt,packet:{creative:packet.creative,structure:packet.structure,autonomy:packet.autonomy},
             settings:packet.settings,layers:packet.creative.layers.length,family:packet.structure?.family||null,
             familyId:packet.structure?.familyId||null,observer:sceOn(packet.settings,'feedbackObserverEnabled'),
             warningSent:!!packet.warning,payloadSeen:false,payloadPriority:0,streaming:null,received:false,rendered:false,ended:false,
@@ -1468,7 +1648,7 @@ function sceDispose(){
     if(sceFinishTimer)clearTimeout(sceFinishTimer);sceFinishTimer=null;
     if(sceBootstrapTimer)clearTimeout(sceBootstrapTimer);sceBootstrapTimer=null;
     sceUiInitObserver?.disconnect();sceUiInitObserver=null;sceUnsubscribeEvents();sceSafeClear();sceSyncTool();
-    for(const map of [SCE_RECORD_CACHE,sceWordIndexCache,SCE_FEEDBACK_STATES,SCE_RUN_RECEIPTS,recentModes,sceRecentCueHistory,sceRecentAnchorHistory,SCE_STRUCTURE_HISTORY,SCE_STRUCTURE_ANCHORS])map.clear();
+    for(const map of [SCE_RECORD_CACHE,sceWordIndexCache,SCE_FEEDBACK_STATES,SCE_RUN_RECEIPTS,recentModes,sceRecentCueHistory,sceRecentAnchorHistory,SCE_STRUCTURE_HISTORY,SCE_STRUCTURE_ANCHORS,SCE_DRIVE_HISTORY])map.clear();
     if(typeof document!=='undefined')document.getElementById('sce_settings')?.remove();
 }
 
@@ -1531,7 +1711,7 @@ function sceRefreshUI(){
     const s=sceSettings(ctx);
     const value=(id,v)=>{const el=sceNode(id);if(el)el.value=String(v);};
     const check=(id,v)=>{const el=sceNode(id);if(el)el.checked=!!v;};
-    check('enabled',s.enabled&&s.mode!=='off');check('autopilot',s.autopilotEnabled);check('notify',s.notifyAfterReply);
+    check('enabled',s.enabled&&s.mode!=='off');check('autonomy',s.autonomyEnabled);check('autopilot',s.autopilotEnabled);check('notify',s.notifyAfterReply);
     value('preset',scePresetMatch(s));value('palette',s.cuePalette);value('disruption',s.disruption);value('keywords',s.customKeywords);value('hidden_tags',s.hiddenTags);value('mode',s.mode);value('role',s.role);value('scope',s.contextScope);
     check('antirepeat',s.antiRepeat);check('structure_anti_repeat',s.structureAntiRepeat);
     for(const [id,key] of SCE_UI_SLIDERS){value(id,s[key]);const out=sceNode(id+'_out');if(out)out.textContent=s[key]+(id==='layers'?'':'%');}
@@ -1561,6 +1741,7 @@ function sceBindUI(){
     on('keywords','input',e=>sceMutate(s=>{s.customKeywords=e.target.value.slice(0,2400);}));
     on('hidden_tags','input',e=>sceMutate(s=>{s.hiddenTags=e.target.value.slice(0,2400);}));
     on('notify','change',e=>sceMutate(s=>{s.notifyAfterReply=e.target.checked;}));
+    on('autonomy','change',e=>sceMutate(s=>{s.autonomyEnabled=e.target.checked;}));
     on('mode','change',e=>{sceMutate(s=>{s.mode=e.target.value;if(s.mode!=='automatic')s.autopilotEnabled=false;if(s.mode==='off')s.enabled=false;});sceCancelCurrent('Operating mode changed');sceSyncTool();});
     on('role','change',e=>sceMutate(s=>{s.role=e.target.value;}));
     on('scope','change',e=>sceMutate(s=>{s.contextScope=e.target.value;}));
@@ -1602,6 +1783,8 @@ function sceInit(){
         '<label for="sce_palette">Cue palette</label><select class="text_pole" id="sce_palette"><option value="neutral">Neutral (default)</option><option value="intense">Intense</option><option value="everyday">Everyday (1.8.0 cues)</option></select>'+
         '<label for="sce_disruption">Disruption</label><select class="text_pole" id="sce_disruption"><option value="off">Off</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High (default)</option><option value="max">Max (adds hard reversals)</option></select>'+
         '<small>Neutral and Intense keep the scene’s own tone and skip the Deliberate anti-climax and Elastic time structures plus the humor cues. Intense adds stakes and consequence cues. Everyday restores the 1.8.0 library.</small>'+
+        '<label class="sce_line" for="sce_autonomy"><span>Character autonomy</span><input type="checkbox" id="sce_autonomy"></label>'+
+        '<small>Characters keep a ledger of mood, wants, desire, stance and private thought, and act on their own goals. Your persona is never tracked or driven.</small>'+
         '<label for="sce_keywords">Your optional keywords</label><textarea class="text_pole" id="sce_keywords" rows="3" maxlength="2400" placeholder="coffee, velvet, awkward pause"></textarea>'+
         sceSlider('keywordboost','Keyword influence')+
         '<label class="sce_line" for="sce_notify"><span>Brief verified-completion notifications</span><input type="checkbox" id="sce_notify"></label>'+

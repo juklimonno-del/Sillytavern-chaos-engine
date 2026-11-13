@@ -26,7 +26,12 @@ test('legacy tool calls retain recency without treating previews or tool output 
     assert.equal(b.context.chatMetadata.storyChaosEngineLearning,undefined);assert.equal(b.notices.length,0);
 });
 for(const type of ['quiet','continue','impersonate'])test(type+' requests do not receive Chaos instructions',async()=>{
-    const b=boot({autopilotEnabled:true});await prepare(b,type);assert.equal(b.injections.at(-1)[1],'');
+    const b=boot({autopilotEnabled:true,autonomyEnabled:false});await prepare(b,type);assert.equal(b.injections.at(-1)[1],'');
+});
+test('continue receives only the autonomy ledger request, never creative or structural cues',async()=>{
+    const b=boot({autopilotEnabled:true,disruption:'max'});await prepare(b,'continue');
+    assert.match(b.injections.at(-1)[1],/Ledger: continue the reply/);assert.doesNotMatch(b.injections.at(-1)[1],/^(?:Break|Change|Form|Lens|Drive|Close):/m);
+    for(const type of ['quiet','impersonate']){await prepare(b,type);assert.equal(b.injections.at(-1)[1],'',type);}
 });
 test('only installing guidance does not produce a completed receipt',async()=>{
     const b=boot({},[u('Go.')]);const run=await prepare(b);assert.equal(run.state,'prepared');assert.equal(b.notices.length,0);

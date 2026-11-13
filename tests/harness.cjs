@@ -37,7 +37,7 @@ function boot(options={},chat=[],seed=12345){
         init:sceInit,dispose:sceDispose,random:randomInt,words:scePersonalWords,
         counters:SCE_ANALYSIS_COUNTERS,caches:[SCE_RECORD_CACHE,sceWordIndexCache,SCE_FEEDBACK_STATES,SCE_RUN_RECEIPTS,
           recentModes,sceRecentCueHistory,sceRecentAnchorHistory,SCE_STRUCTURE_HISTORY,SCE_STRUCTURE_ANCHORS],
-        structureHistory:SCE_STRUCTURE_HISTORY,cueHistory:sceRecentCueHistory,key:getChatKey};`,scope,{filename:'index.js'});
+        structureHistory:SCE_STRUCTURE_HISTORY,autonomy:sceAutonomyRoll,parseTracker:sceParseTracker,stripTracker:sceStripTracker,ledgers:sceLedgerHistory,driveHistory:SCE_DRIVE_HISTORY,cueHistory:sceRecentCueHistory,key:getChatKey};`,scope,{filename:'index.js'});
     const api=scope.__test;api.init();
     return {context,scope,api,events,handlers,injections,tools,notices,cleared,setContext(c){current=c;}};
 }

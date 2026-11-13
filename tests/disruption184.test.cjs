@@ -55,7 +55,7 @@ test('breaks never deflate and hard reversals appear only at max',()=>{
 });
 
 test('a break is independent of the category weights, so the engine is not only a pace keeper',()=>{
-    const b=boot({disruption:'max',autopilotEnabled:true},DARK,3),s=b.api.settings(b.context);
+    const b=boot({disruption:'max',autopilotEnabled:true,autonomyEnabled:false},DARK,3),s=b.api.settings(b.context);
     s.categoryWeights=Object.fromEntries(Object.keys(b.api.categories).map(id=>[id,0]));s.customKeywords='';s.contextGravity=0;s.structureEnabled=false;
     s.featureOverrides.structureEnabled='off';
     for(let i=0;i<20;i++){

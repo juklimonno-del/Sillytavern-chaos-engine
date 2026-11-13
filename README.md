@@ -1,8 +1,26 @@
-# Story Chaos Engine 1.8.4
+# Story Chaos Engine 1.9.0
 
 Browser-side creative guidance for SillyTavern. One ordinary model request, one depth-zero injection, no additional inference service, analytics, or API key.
 
-**Release:** 1.8.4 disruption update on top of the 1.8.3 packet-format and tone update, the the 1.8.0 Structural Entropy expansion, itself based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. The release pull request and its GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.x test results.
+**Release:** 1.9.0 character autonomy update on top of the 1.8.4 disruption update, the 1.8.3 packet-format and tone update, and the 1.8.0 Structural Entropy expansion, itself based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. The release pull request and its GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.x or 1.9.x test results.
+
+## What changed in 1.9.0
+
+Characters now carry their own state and act on it. The engine still makes one ordinary request with one depth-zero injection.
+
+- **Ledger.** The packet asks the model to end each reply with a `<sce_tracker>` block, one line per character present:
+  `Name | mood: word 1-5 | feels: feeling → target | want: scene goal | desire: own long goal | toward User: word -3 to +3 | thinks: one private line`.
+  Your persona is never tracked or driven.
+- **State without storage.** The current state is read from the newest surviving reply that has a tracker. Swipes, edits, deletions and branches roll it back automatically, and editing a tracker by hand edits the state. Old trackers are removed from the outgoing request (saved messages are untouched); the newest state rides in the packet as `State (Name):` lines, at most three characters.
+- **Not user-favored.** Up to two guard lines per packet push back on drift toward the user:
+  - `Want:` when a want or desire exists to please, keep or serve the user (wants aimed against the user are left alone).
+  - `Stance:` when regard for the user has only warmed for four or more replies, or sits pinned at +3.
+  - `Desire:` when a long goal changes; the model shows the cause or returns to the old one.
+  - `Stall:` when the same want has gone unmet for four replies.
+- **Drives.** On 30%, 45%, 60%, 75% or 90% of packets (by Disruption level), one character (sometimes two in groups) gets a `Drive:` line: initiative, want-versus-desire conflict, concealment of a private thought, mood against the scene, an off-screen agenda surfacing, or resisting when the user’s move cuts against their want. Max adds a desire that cracks or proves to be cover. Drives are written about the character’s goals, never about accommodating the user.
+- **Continue mode.** Continue gets a short packet with only the current `State` lines and a request to end the reply with a fresh tracker; no lenses, breaks or drives. The old tracker is removed from the text being continued, and SillyTavern saves the continuation on top of that text, so the finished reply carries exactly one ledger. If you stop a continuation partway, the reply has no ledger and state falls back to the previous reply's.
+- **Own budget.** Ledger lines sit outside the 250-word packet budget, so they never crowd out lenses.
+- **Character autonomy** checkbox in the panel, on by default and applied to existing installations. The tracker stays visible in replies in this release so you can watch it work.
 
 ## What changed in 1.8.4
 
@@ -36,7 +54,7 @@ The everyday panel has an **Engine enabled** master switch, **Autopilot**, your 
 
 The normal updater follows the installed repository branch. Use `main` for published releases. Back up local modifications before updating.
 
-Use SillyTavern's Extension Manager to install or update from [juklimonno-del/Sillytavern-chaos-engine](https://github.com/juklimonno-del/Sillytavern-chaos-engine), reload SillyTavern, and confirm that both the installed manifest and panel show **1.8.0**.
+Use SillyTavern's Extension Manager to install or update from [juklimonno-del/Sillytavern-chaos-engine](https://github.com/juklimonno-del/Sillytavern-chaos-engine), reload SillyTavern, and confirm that both the installed manifest and panel show **1.9.0**.
 
 ### Optional manual update from the recorded 1.7.1 files
 
@@ -56,7 +74,7 @@ The script makes a timestamped backup beside the target directory, atomically re
 
 The deployable runtime files are `manifest.json`, `entry.js`, `index.js`, and `style.css`; retain `LICENSE`. A new manual installation can place those in one third-party extension folder. Do not enable two copies. For a manual update from the exact recorded v1.7.1 files, the applier preserves `.git` and unrelated files instead of replacing the whole directory. If it detects modified or newer files, reconcile those changes manually. Keep local changes backed up before using the host's updater again.
 
-Restart/reload SillyTavern and check that the panel says **v1.8.4**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
+Restart/reload SillyTavern and check that the panel says **v1.9.0**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
 
 ## Controls that mean what they say
 

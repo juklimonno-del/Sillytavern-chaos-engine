@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.0 — November 13, 2026
+
+Character autonomy release. No change to completion receipts, learning, or saved chat data.
+
+- Add a character ledger. The packet asks for a `<sce_tracker>` block after each reply (mood, feeling, want, desire, stance toward the user, private thought) for every character except the user persona.
+- Derive state from the newest surviving tracker in the chat; nothing is stored separately, so swipes, edits, deletions and branches roll it back. Re-inject up to three characters as `State` lines.
+- Remove trackers from the outgoing request by replacing message slots with stripped clones in the generation interceptor. Saved messages are never edited.
+- Add user-favoring guards (`Want`, `Stance`, `Desire`, `Stall`), capped at two per packet.
+- Add `Drive` rolls scaled by the Disruption level; Max adds desire fractures. Drive types avoid immediate repeats when anti-repeat is on.
+- Remove `{{` and `}}` from tracker fields before re-injection, because SillyTavern runs macro substitution on extension prompts; model-written text can no longer trigger macros.
+- Add a continue mode for autonomy: Continue receives only `State` lines and a request to end with a fresh tracker. The old tracker is removed from the outgoing copy of the continued reply, which SillyTavern uses as the saved prefix, so the finished reply holds one ledger. Quiet and impersonate requests still receive nothing; Continue still receives nothing with autonomy off.
+- Give ledger lines their own word budget outside the 250-word packet limit.
+- Add a **Character autonomy** setting, on by default including for existing installations.
+- Harden the Chromium test launcher on CI runners: allow 45 s for launch and treat an incomplete temporary-profile cleanup as a warning. Both failures had been intermittent on `main` before this release.
+- Add `tests/autonomy190.test.cjs`. Scope legacy packet-budget, empty-packet and continue assertions to non-autonomy content.
+
 ## 1.8.4 — November 12, 2026
 
 Disruption release. No change to host lifecycle, completion receipts, learning, or storage.
