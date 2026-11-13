@@ -38,7 +38,7 @@
   "payload_sha256": {
     ".github/workflows/test.yml": "3b05292884060e426fb15adf7a08650dd121f246fb0db6d60f3ea4bd78706f4f",
     "AUDIT-FIXES.md": "2fb1fb6193482edc64cfa2480c4d2cdd1ac66ad7767ed939f6e3b47848cb68b3",
-    "CHANGELOG.md": "1076fce08daf21f4a9ad0aff08c459cf2227e52d9eae1a3235c00eed76dc5e03",
+    "CHANGELOG.md": "ad70d0d8496bc74e671f9af7881e1231a5ef9309307950453ea33bfe1f5f95b6",
     "LICENSE": "a71334ecce3ad48085fa743a8ba13d458c30dc21879be057e90aad76c1b8b8dd",
     "PUBLISHING.md": "adf52330252a5f17e419055c4c81f471ed08f54359e6d1672d51741d7abaaf79",
     "README.md": "dd8a1013918aea767352dbf398c16655088cc82b9b820d03b444275802d80546",
@@ -49,7 +49,7 @@
     "manifest.json": "9b366731c5e100e5702fe8b6857f18c9607af58a4a64424cde2000bbb36ddba5",
     "scripts/apply_release.py": "32973d04e8b28275af9a588eaee82ee0ee3c0e0605daf44d971afc0dbe970545",
     "scripts/benchmark.cjs": "17d2f4c388681345bfced1850680a56c66529d7e777e788517a79e2ce5f36e90",
-    "scripts/browser-test.cjs": "4e55809a9470d6369f0b7a52ef2ed37016401b3aaae0094eb3a7fb6139aac703",
+    "scripts/browser-test.cjs": "b8b50d2ec5090fbad25feb0c8834d3b56fa999d10a2b2930086ace7c96b6810f",
     "style.css": "2c6d3ca09ee506628f1e0a4dba0da3f6b1b2d46e51c082362f1f2042767817eb",
     "tests/autonomy190.test.cjs": "5d29354f8f2d5be92572b6614beef331c78c91e0c79e624c1e66309b775d3d03",
     "tests/browser-fixture.html": "19848b01dc2c1db1793867ac0ceb7c55d5e241679d2042b126981fce660a6e26",
