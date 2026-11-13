@@ -140,3 +140,33 @@ test('a ledger in the reply does not disturb completion receipts or story analys
     assert.equal(finish(b,run).state,'completed');
     assert.doesNotMatch(b.api.clean(b.context.chat.at(-1).mes),/mood|ledger before dawn/);
 });
+
+test('continue mode drops the old ledger from the continued reply and asks for a fresh one at the end',async()=>{
+    const chat=chatOf(tracked('Nora waited.',line('Nora')),tracked('Nora reached for the',line('Nora',{want:'a boat out'})));
+    const b=boot({disruption:'max'},chat),outgoing=[...b.context.chat],saved=outgoing.map(m=>m.mes);
+    b.events.emit('GENERATION_STARTED','continue',{},false);
+    await b.scope.storyChaosEngineInterceptor(outgoing,8192,()=>{},'continue');
+    const prompt=b.injections.at(-1)[1];
+    assert.match(prompt,/^<scene_direction id="SCE-[^"]+">\nState \(Nora\): [^\n]*want: a boat out[^\n]*\nLedger: continue the reply from where it stops, then end it with a fresh <sce_tracker>, one line per character present except User[^\n]*\n<\/scene_direction>$/);
+    assert.doesNotMatch(prompt,/^(?:Break|Change|Form|Lens|Drive|Close|Stance|Want|Desire|Stall)/m,'a continuation adds no new pressure');
+    assert.deepEqual(b.context.chat.map(m=>m.mes),saved,'saved chat is unchanged before the host merges');
+    assert.equal(outgoing.at(-1).mes,'Nora reached for the');
+    assert.equal(b.api.run(),null,'continue does not open a completion receipt');
+    // The host saves continue_mag (the outgoing last message) + new text.
+    const merged=outgoing.at(-1).mes+' oar.\n<sce_tracker>\n'+line('Nora',{want:'the far bank'})+'\n</sce_tracker>';
+    assert.equal((merged.match(/<sce_tracker>/g)||[]).length,1,'exactly one ledger in the finished reply');
+    b.context.chat.at(-1).mes=merged;
+    assert.match(b.api.packet(b.context,true).prompt,/want: the far bank/);
+});
+
+test('continue without a ledger yet still asks for one; continue with autonomy off injects nothing and strips nothing',async()=>{
+    let b=boot({},[a('Nora reached for the')]);
+    await b.scope.storyChaosEngineInterceptor([...b.context.chat],8192,()=>{},'continue');
+    assert.match(b.injections.at(-1)[1],/^<scene_direction id="[^"]+">\nLedger: continue the reply/);
+    b=boot({autonomyEnabled:false},[tracked('Nora reached for the',line('Nora'))]);const out=[...b.context.chat];
+    await b.scope.storyChaosEngineInterceptor(out,8192,()=>{},'continue');
+    assert.equal(b.injections.at(-1)[1],'');assert.match(out[0].mes,/sce_tracker/);
+    b=boot({enabled:false},[tracked('Nora reached for the',line('Nora'))]);
+    await b.scope.storyChaosEngineInterceptor([...b.context.chat],8192,()=>{},'continue');
+    assert.equal(b.injections.at(-1)?.[1]??'','');
+});

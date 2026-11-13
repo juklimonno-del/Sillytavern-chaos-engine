@@ -1038,8 +1038,8 @@ function sceStateLine(a,user){
             Number.isFinite(a.towardLevel)?'toward '+user+': '+(a.towardLevel>0?'+':'')+a.towardLevel:null].filter(Boolean);
     return 'State ('+a.name+'): '+bits.join(' · ')+'.';
 }
-function sceTrackerInstruction(user){
-    return 'Ledger: after the reply, write <sce_tracker>, one line per character present except '+user+
+function sceTrackerInstruction(user,continuing=false){
+    return (continuing?'Ledger: continue the reply from where it stops, then end it with a fresh <sce_tracker>':'Ledger: after the reply, write <sce_tracker>')+', one line per character present except '+user+
         ' — Name | mood: word 1-5 | feels: feeling → target | want: their goal in this scene | desire: their own long goal | toward '+user+': word -3 to +3 | thinks: one private line — then </sce_tracker>.';
 }
 function sceAutonomyRoll(context=sceContext(),type='normal'){
@@ -1055,6 +1055,15 @@ function sceAutonomyRoll(context=sceContext(),type='normal'){
     for(const d of drives)lines.push(d.text);
     lines.push(sceTrackerInstruction(user));
     return {lines,guards,drives,actors:latest.map(a=>a.name),words:lines.join(' ').split(/\s+/u).length};
+}
+// Continue mode. The host saves a continuation as (outgoing last message + new text), so stripping the
+// tracker from the outgoing copy drops the old ledger from the saved reply and the model ends it with a fresh one.
+// No lenses, breaks or drives: a continuation finishes the turn already in progress.
+function sceContinuePacket(context=sceContext(),marker=''){
+    const s=sceSettings(context);if(!sceAutonomyOn(s))return '';
+    const user=sceUserName(context),latest=sceLedgerHistory(context,'continue').at(-1)||[];
+    return ['<scene_direction'+(marker?' id="'+marker+'"':'')+'>',...latest.slice(0,3).map(a=>sceStateLine(a,user)),
+        sceTrackerInstruction(user,true),'</scene_direction>'].join('\n');
 }
 function sceAutonomyStripChat(chat,s){
     if(!Array.isArray(chat)||!sceAutonomyOn(s))return 0;let n=0;
@@ -1576,6 +1585,12 @@ globalThis.storyChaosEngineInterceptor=async function(chat,_contextSize,_abort,t
     try{
         const settings=sceSettings(context),kind=type||'normal';
         sceSubscribeEvents(context);
+        if(kind==='continue'&&sceRuntimeEnabled&&settings.enabled&&settings.mode==='automatic'&&sceAutonomyOn(settings)){
+            const prompt=sceContinuePacket(context,'SCE-'+(++sceRunCounter)+'-'+randomInt(1000000));
+            sceAutonomyStripChat(chat,settings);
+            context.setExtensionPrompt(SCE_PROMPT_ID,prompt,1,0,false,settings.role==='system'?0:1);
+            return;
+        }
         if(!sceRuntimeEnabled||!settings.enabled||settings.mode!=='automatic'||!['normal','regenerate','swipe'].includes(kind)){
             sceSafeClear(context);return;
         }

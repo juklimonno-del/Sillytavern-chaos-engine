@@ -18,6 +18,7 @@ Characters now carry their own state and act on it. The engine still makes one o
   - `Desire:` when a long goal changes; the model shows the cause or returns to the old one.
   - `Stall:` when the same want has gone unmet for four replies.
 - **Drives.** On 30%, 45%, 60%, 75% or 90% of packets (by Disruption level), one character (sometimes two in groups) gets a `Drive:` line: initiative, want-versus-desire conflict, concealment of a private thought, mood against the scene, an off-screen agenda surfacing, or resisting when the user’s move cuts against their want. Max adds a desire that cracks or proves to be cover. Drives are written about the character’s goals, never about accommodating the user.
+- **Continue mode.** Continue gets a short packet with only the current `State` lines and a request to end the reply with a fresh tracker; no lenses, breaks or drives. The old tracker is removed from the text being continued, and SillyTavern saves the continuation on top of that text, so the finished reply carries exactly one ledger. If you stop a continuation partway, the reply has no ledger and state falls back to the previous reply's.
 - **Own budget.** Ledger lines sit outside the 250-word packet budget, so they never crowd out lenses.
 - **Character autonomy** checkbox in the panel, on by default and applied to existing installations. The tracker stays visible in replies in this release so you can watch it work.
 
