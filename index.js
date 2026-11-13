@@ -1,7 +1,7 @@
-// Story Chaos Engine v1.8.3. Browser-only; no extra model calls or telemetry.
+// Story Chaos Engine v1.8.4. Browser-only; no extra model calls or telemetry.
 // Pure selection/analysis helpers are kept separate from the host lifecycle below.
 'use strict';
-const SCE_VERSION = '1.8.3';
+const SCE_VERSION = '1.8.4';
 const SCE_SETTINGS_KEY = 'storyChaosEngine';
 const SCE_PROMPT_ID = 'story_chaos_engine_auto';
 const SCE_FEATURES = ['structureEnabled', 'feedbackObserverEnabled', 'feedbackBalancerEnabled', 'endingWatchEnabled'];
@@ -276,6 +276,43 @@ const SCE_STRUCTURE_FAMILIES = {
         routes:[
             {id:'examine',label:'Evidence before interpretation',orders:{3:[0,3,4],4:[0,2,3,4],5:[0,1,2,3,4]}},
             {id:'check',label:'Test an established interpretation',orders:{4:[5,2,3,4],5:[5,0,2,3,4]}}
+        ]},
+    rupture:{title:'Rupture',weight:2,min:3,max:5,affinity:{action:1,dialogue:1,social:1,consequence:1},
+        phases:[
+            ['Let the current pattern run for one beat','Continue the activity exactly as it has been going'],
+            ['Break it with an event nobody in the scene planned','Interrupt it with something the characters did not expect'],
+            ['Show each character’s first, unrehearsed response','Let the characters react before they have time to think'],
+            ['Commit a character to a step that cannot be taken back','Follow the reaction into an irreversible action'],
+            ['Let the new situation set the terms for what comes next','Carry the aftermath into the next available action']
+        ],
+        transitions:['Cut straight into the break','Let the break arrive mid-sentence of the old activity','Hard cut to the response'],
+        routes:[
+            {id:'sudden',label:'Break after one beat',orders:{3:[0,1,3],4:[0,1,2,3],5:[0,1,2,3,4]}},
+            {id:'ambush',label:'Break at once',orders:{3:[1,2,3],4:[1,2,3,4]}}
+        ]},
+    reversal:{title:'Reversal',weight:1,min:3,max:5,affinity:{social:2,consequence:2,dialogue:1},
+        phases:[
+            ['Establish who holds the advantage','Show what each side believes is settled'],
+            ['Let one detail turn against that advantage','Expose a fact that undermines what was settled'],
+            ['Move the advantage to a different character','Flip who is exposed and who is in control'],
+            ['Show the new balance in action','Let the characters act on the changed balance'],
+            ['Leave the old assumption visibly gone','Close on the cost of the turn']
+        ],
+        transitions:['The turn arrives without warning','One fact changes everything that follows','The balance flips in a single beat'],
+        routes:[
+            {id:'unravel',label:'Establish, then turn',orders:{3:[0,1,2],4:[0,1,2,3],5:[0,1,2,3,4]}},
+            {id:'sudden',label:'Turn at once',orders:{3:[1,2,3],4:[1,2,3,4]}}
+        ]},
+    shift:{title:'Tempo shift',weight:2,min:3,max:4,affinity:{action:1,dialogue:1,observation:1},
+        phases:[
+            ['Open at the pace the scene has been using','Start in the current tempo'],
+            ['Change the tempo sharply: slow becomes urgent, or urgent becomes still','Cut the pace hard in the opposite direction'],
+            ['Let the new tempo change what each character notices','Let the changed pace reshape each character’s choices'],
+            ['Hold the new tempo through to the close','Finish in the new tempo without easing back']
+        ],
+        transitions:['The shift is abrupt','The shift follows a single trigger','Tempo changes between sentences'],
+        routes:[
+            {id:'turn',label:'Change tempo midway',orders:{3:[0,1,3],4:[0,1,2,3]}}
         ]}
 };
 const SCE_STRUCTURE_ENDINGS = ['Finish on a completed small action, not a hook.',
@@ -323,7 +360,61 @@ function sceCuePool(id,palette){
     const kept=sceTonePool(cues,palette);
     return palette==='intense'?[...kept,...(SCE_INTENSE_CUES[id]||[])]:kept;
 }
-function sceEndings(palette){return palette==='everyday'?SCE_STRUCTURE_ENDINGS:palette==='intense'?SCE_INTENSE_ENDINGS:SCE_NEUTRAL_ENDINGS;}
+function sceEndings(palette,level='off'){
+    if(palette==='everyday')return SCE_STRUCTURE_ENDINGS;
+    if(level!=='off')return palette==='intense'?[...SCE_BREAK_ENDINGS,...SCE_INTENSE_ENDINGS.slice(5)]:SCE_BREAK_ENDINGS;
+    return palette==='intense'?SCE_INTENSE_ENDINGS:SCE_NEUTRAL_ENDINGS;
+}
+// Disruption (1.8.4). One break per packet, rolled apart from the cue palette. Every line escalates, swerves or complicates; none deflates.
+// "swerve" breaks are available from Low up. "hard" reversals join them at Max only.
+const SCE_DISRUPTION_LEVELS = ['off','low','medium','high','max'];
+const SCE_DISRUPTION_CHANCE = {off:0,low:.3,medium:.55,high:.8,max:1};
+const SCE_DISRUPTION_STEP = {off:0,low:.25,medium:.5,high:.75,max:1};
+const SCE_DISRUPTION_HARD_SHARE = 45;
+const SCE_DISRUPTIONS = {
+    swerve:[
+        'Someone or something arrives uninvited and changes who holds the leverage.',
+        'An established fact proves incomplete in a way that matters right now.',
+        'A character does the opposite of their last pattern, for a reason they keep to themselves.',
+        'The tempo changes sharply: slow becomes urgent, or urgent goes still.',
+        'A character withholds something, and the cost of withholding shows.',
+        'A choice is forced; waiting is no longer an option.',
+        'A physical cost lands and cannot be shrugged off.',
+        'A secondary character acts on their own agenda, and it collides with the scene.',
+        'An object, sound or detail already present turns out to carry weight.',
+        'One part of the plan works and another fails, and the failure creates a new problem.',
+        'A character says the thing they have been avoiding.',
+        'The narration stays on something the main characters are ignoring.',
+        'A small action has a larger consequence than anyone intended.',
+        'Two goals collide and one character has to give ground.',
+        'A character commits to something before they have finished deciding.',
+        'The location, the light or the weather turns against what the characters were doing.'
+    ],
+    hard:[
+        'Reverse what the scene just established: the advantage, the alliance or the safety flips.',
+        'What a character believed is shown false, and they have to act on that now.',
+        'Cut hard to the next consequential moment and let the gap carry what changed.',
+        'A character breaks the scene’s pattern completely and commits to something irreversible.',
+        'Someone’s real motive surfaces and recolors the last few exchanges.',
+        'The ground shifts: the place, the rules or the stakes are not what they were.'
+    ]
+};
+const SCE_BREAK_ENDINGS = ['End mid-motion, before anything resolves.','End on a line of dialogue.',
+    'End on a sensory detail that changes the room.','End on a decision made.','End on a consequence landing.',
+    'End on the beat that keeps the tension in play.','End on an arrival or a departure.',
+    'End on what a character does next, not on what they feel.'];
+function sceDisruptionLevel(s){return SCE_DISRUPTION_LEVELS.includes(s?.disruption)?s.disruption:'high';}
+// Multipliers on top of saved family weights. Break families gain with the level; static ones lose. Saved weights are never rewritten.
+function sceDisruptionFamily(level){
+    const t=SCE_DISRUPTION_STEP[level]??.75;
+    return {rupture:1+2*t,shift:1+2*t,reversal:level==='max'?3:0,sustained:1-.7*t,zoom:1-.5*t,funnel:1-.4*t,accumulate:1-.3*t};
+}
+function sceDisruptionRoll(s,recent=[]){
+    const level=sceDisruptionLevel(s),chance=SCE_DISRUPTION_CHANCE[level];
+    if(!chance||!sceChance(chance*100))return null;
+    const tier=level==='max'&&sceChance(SCE_DISRUPTION_HARD_SHARE)?'hard':'swerve',pool=SCE_DISRUPTIONS[tier];
+    return {tier,instruction:s.antiRepeat?pickFresh(pool,recent):pick(pool)};
+}
 const SCE_STOP = new Set(('a about after again all already also am an and any are as at back be because '+
     'been before being between both but by can cannot could did do does doing dont down each either '+
     'else even every for from get gets getting give go going got had has have having he her here him '+
@@ -340,7 +431,7 @@ const SCE_WORD_STOP = new Set([...SCE_STOP,...('two three four five six seven ei
     'seem seems seemed maybe perhaps almost enough another could\'ve would\'ve').split(' ')]);
 const SCE_HIDDEN_TAGS = ['think','thinking','analysis','reasoning','cot','brainstorm','planning',
     'tracker','scene_tracker','state_tracker','sce_tracker','hidden','ooc','metadata','script','style'];
-const SCE_ADV_DEFAULTS = {intensity:55,maxLayers:3,contextGravity:75,contextScope:'full',customKeywords:'',keywordBoost:30,antiRepeat:true,cuePalette:'neutral'};
+const SCE_ADV_DEFAULTS = {intensity:55,maxLayers:3,contextGravity:75,contextScope:'full',customKeywords:'',keywordBoost:30,antiRepeat:true,cuePalette:'neutral',disruption:'high'};
 const SCE_STRUCTURE_DEFAULTS = {structureEnabled:false,structureInfluence:65,beatDensity:55,structureGrounding:75,structureAntiRepeat:true};
 const SCE_FEEDBACK_DEFAULTS = {feedbackObserverEnabled:false,feedbackBalancerEnabled:false,feedbackStrength:65,feedbackWindow:8};
 const SCE_ENDING_WATCH_DEFAULTS = {endingWatchEnabled:false,endingWatchStrength:85,endingWatchWindow:8,endingWatchMinimum:3};
@@ -366,6 +457,7 @@ function sceSettings(context=sceContext()) {
     s.maxLayers=sceBound(s.maxLayers,3,1,5);
     if(!['full','recent'].includes(s.contextScope))s.contextScope='full';
     if(!SCE_PALETTES.includes(s.cuePalette))s.cuePalette='neutral';
+    if(!SCE_DISRUPTION_LEVELS.includes(s.disruption))s.disruption='high';
     for(const key of ['customKeywords','hiddenTags'])s[key]=typeof s[key]==='string'?s[key].slice(0,2400):'';
     for(const key of ['feedbackWindow','endingWatchWindow'])s[key]=[4,8,16].includes(Number(s[key]))?Number(s[key]):8;
     s.endingWatchMinimum=Math.min(s.endingWatchWindow,[3,4,5].includes(Number(s.endingWatchMinimum))?Number(s.endingWatchMinimum):3);
@@ -608,6 +700,7 @@ function sceLayeredRoll(context=sceContext(),preview=false,structure=null){
         const instruction=s.antiRepeat?pickFresh(pool,recent):pick(pool);
         layers.push({id,title:def.name,instruction});candidates.splice(candidates.findIndex(x=>x.value===id),1);
     }
+    const disruption=sceDisruptionRoll(s,old.filter(x=>x.startsWith('disruption:')).map(x=>x.slice(11)));
     const enabled=layers.length>0,previous=sceRecentAnchorHistory.get(key)||[];
     const available=index.options.filter(x=>!s.antiRepeat||!previous.includes(x.value));
     const anchor=enabled&&index.options.length&&sceChance(s.contextGravity)?sceWeighted(available.length?available:index.options):null;
@@ -625,9 +718,9 @@ function sceLayeredRoll(context=sceContext(),preview=false,structure=null){
     }
     // Disabled categories cannot leak legacy focus, pacing or wildcard directions.
     const result={roll:randomInt(1000)+1,creative_mode:layers[0]?.instruction||'Keyword-only / no creative lenses',
-        anchor,word_sparks:sparks,layers,context_messages:index.analyzed};
+        anchor,word_sparks:sparks,layers,disruption,context_messages:index.analyzed};
     if(!preview){
-        sceRecentCueHistory.set(key,[...layers.map(x=>x.id+':'+x.instruction),...old].slice(0,15));
+        sceRecentCueHistory.set(key,[...(disruption?['disruption:'+disruption.instruction]:[]),...layers.map(x=>x.id+':'+x.instruction),...old].slice(0,15));
         const direction=layers.find(x=>x.id==='direction');
         if(direction)recentModes.set(key,[direction.instruction,...(recentModes.get(key)||[])].slice(0,6));
         if(anchor)sceRecentAnchorHistory.set(key,[anchor,...previous].slice(0,5));
@@ -790,6 +883,29 @@ function sceEndingWatch(context=sceContext(),type='normal'){
     return available.length?{...available[0],strength:s.endingWatchStrength}:null;
 }
 
+// Pattern-break detection (1.8.4). Looks at how recent replies open, end and split between speech and narration,
+// and names a different shape when the same one keeps repeating. Content is never inspected for events.
+function sceShapeWatch(context=sceContext(),type='normal',closingWatchActive=false){
+    const s=context?._sceSettings||sceSettings(context),level=sceDisruptionLevel(s);
+    if(level==='off')return null;
+    const samples=sceFeedbackReplyEntries(context,4,type);if(samples.length<4)return null;
+    const need=level==='low'||level==='medium'?4:3;
+    const clean=samples.map(x=>sceRecord(x.message,s).clean.trim());
+    const count=(fn,value)=>clean.filter(x=>fn(x)===value).length;
+    const opener=x=>/^["“]/u.test(x)?'<speech>':(x.match(/[\p{L}\p{N}]+/u)||[''])[0].toLowerCase();
+    const endsSpoken=x=>/["”]\s*[*_]*$/u.test(x);
+    const share=x=>{let n=0;for(const m of x.matchAll(/"([^"\n]+)"|“([^”\n]+)”/gu))n+=(m[1]||m[2]||'').length;return n/Math.max(1,x.length);};
+    const found=[];
+    const first=opener(clean.at(-1));
+    if(first&&count(opener,first)>=need)found.push({trait:'opening',text:first==='<speech>'
+        ?'Open on action or a sensory detail instead of a spoken line.'
+        :'Open with a different kind of first sentence: a spoken line, a sound, or motion already under way.'});
+    if(count(endsSpoken,true)>=need&&!closingWatchActive)found.push({trait:'ending',text:'End on action or a physical detail, not on spoken words.'});
+    if(count(endsSpoken,false)>=4&&!closingWatchActive)found.push({trait:'ending',text:'End on a spoken line.'});
+    if(clean.every(x=>share(x)<.2))found.push({trait:'speech',text:'Give dialogue the lead in this reply.'});
+    if(clean.every(x=>share(x)>.6))found.push({trait:'narration',text:'Let action and description carry this reply, with little speech.'});
+    return found.length?pick(found):null;
+}
 function sceStructureSettings(context=sceContext()){return context?._sceSettings||sceSettings(context);}
 function sceStructureSignals(context=sceContext()){
     const s=context?._sceSettings||sceSettings(context);
@@ -867,10 +983,11 @@ function sceStructuralRoll(context=sceContext(),preview=false,type='normal'){
     const s=sceStructureSettings(context);if(!sceEffective(s,'structureEnabled'))return null;
     const key=getChatKey(context),history=SCE_STRUCTURE_HISTORY.get(key)||[],signals=sceStructureSignals(context);
     const target=sceStructureTargetCount(s.beatDensity),influence=s.structureInfluence/100;
-    const palette=scePalette(s),familyTone=SCE_PALETTE_FAMILY[palette]||{};
-    const pool=Object.entries(SCE_STRUCTURE_FAMILIES).filter(([id])=>s.structureWeights[id]*(familyTone[id]??1)>0).map(([id,f])=>{
+    const palette=scePalette(s),level=sceDisruptionLevel(s),breaks=sceDisruptionFamily(level);
+    const familyTone=Object.fromEntries(Object.keys(SCE_STRUCTURE_FAMILIES).map(id=>[id,(SCE_PALETTE_FAMILY[palette]?.[id]??1)*(breaks[id]??1)]));
+    const pool=Object.entries(SCE_STRUCTURE_FAMILIES).filter(([id])=>s.structureWeights[id]*familyTone[id]>0).map(([id,f])=>{
         const compatible=Object.entries(f.affinity).reduce((a,[signal,w])=>a+(signals[signal]||0)*w,0);
-        let weight=s.structureWeights[id]*(familyTone[id]??1)*(1+s.structureGrounding/100*Math.min(8,compatible)*.14)/(1+Math.max(0,f.min-target));
+        let weight=s.structureWeights[id]*familyTone[id]*(1+s.structureGrounding/100*Math.min(8,compatible)*.14)/(1+Math.max(0,f.min-target));
         if(['mosaic','reverse','pivot','time','anticlimax'].includes(id))weight*=1+influence;
         if(s.structureAntiRepeat){const position=history.slice(0,4).findIndex(x=>x.family===id);
             if(position>=0)weight*=.18+.16*position;}
@@ -899,7 +1016,7 @@ function sceStructuralRoll(context=sceContext(),preview=false,type='normal'){
     const index=context?._sceIndex||sceWordIndex(context),prior=SCE_STRUCTURE_ANCHORS.get(key)||[];
     const candidates=index.options.filter(x=>!s.structureAntiRepeat||!prior.includes(x.value)),anchors=[];
     if(index.options.length&&sceChance(s.structureGrounding))anchors.push(sceWeighted(candidates.length?candidates:index.options));
-    result.ending=pick(sceEndings(palette));result.anchors=anchors;
+    result.ending=pick(sceEndings(palette,level));result.anchors=anchors;
     if(!preview){SCE_STRUCTURE_HISTORY.set(key,[sceStructureHistoryItem(result),...history].slice(0,8));
         if(anchors.length)SCE_STRUCTURE_ANCHORS.set(key,[...anchors,...prior].slice(0,10));}
     return result;
@@ -1026,7 +1143,7 @@ function sceFormatPrompt(roll){
 }
 function sceFormatStructure(structure){
     if(!structure)return '';
-    return ['Form: '+structure.family+', '+structure.kind+'.',
+    return ['Form: '+structure.family+'.',
         structure.route?'Route: '+structure.route+'.':null,
         'Phases: '+structure.beats.map(x=>x.role).join(' → ')+'.',
         structure.beats.length>1?'Attention: '+structure.attentionLabel:null,
@@ -1037,18 +1154,18 @@ function sceFormatEndingWatch(watch){
     if(watch.kind==='phrase')return 'Repeated closing wording ('+watch.count+'/'+watch.total+'): "'+watch.label.replace(/^literal closing wording: /u,'')+'". Refresh the wording and keep the events the scene already has.';
     return 'Recurring close ('+watch.count+'/'+watch.total+'): '+watch.label+'. Choose a different closing beat unless the user requested it or continuity requires it.';
 }
-function sceFormatCombined(roll,structure,watch=null,marker=''){
-    if(!(roll?.layers?.length||roll?.word_sparks?.length||structure||watch))return '';
+function sceFormatCombined(roll,structure,watch=null,marker='',shape=null){
+    if(!(roll?.layers?.length||roll?.word_sparks?.length||roll?.disruption||structure||watch||shape))return '';
     const anchors=[...new Set([roll?.anchor,...(structure?.anchors||[])].filter(Boolean))].slice(0,1);
-    const lines=['<scene_direction'+(marker?' id="'+marker+'"':'')+'>',
-        'Hold the scene’s established tone and intensity. Honor continuity, character knowledge, the user’s agency and established formatting.',
-        'Work the cues that fit into concrete events.'];
+    const lines=['<scene_direction'+(marker?' id="'+marker+'"':'')+'>'];
     if(watch)lines.push(sceFormatEndingWatch(watch));
+    if(roll?.disruption)lines.push('Break: '+roll.disruption.instruction);
+    if(shape)lines.push('Change: '+shape.text);
     if(structure)lines.push(sceFormatStructure(structure));
     const creative=sceFormatPrompt(roll);if(creative)lines.push(creative);
     if(anchors.length)lines.push('Context word: "'+anchors[0]+'".');
     if(structure&&!watch)lines.push('Close: '+structure.ending);
-    lines.push('Reply with the fiction turn only.','</scene_direction>');
+    lines.push('</scene_direction>');
     return lines.join('\n');
 }
 function sceBuildPacket(context=sceContext(),preview=false,type='normal',marker=''){
@@ -1058,16 +1175,17 @@ function sceBuildPacket(context=sceContext(),preview=false,type='normal',marker=
     const structure=sceStructuralRoll(snapshot,true,type),creative=sceLayeredRoll(snapshot,true,structure);
     const warning=sceEndingWatch(snapshot,type);
     // Soft caps are applied to choices, never by truncating continuity or agency instructions.
-    let prompt=sceFormatCombined(creative,structure,warning,marker);
-    while(prompt.split(/\s+/u).length>250&&creative.layers.length>1){creative.layers.pop();prompt=sceFormatCombined(creative,structure,warning,marker);}
-    const packet={prompt,creative,structure,warning,settings:s,snapshot,words:prompt?prompt.trim().split(/\s+/u).length:0};
+    const shape=sceShapeWatch(snapshot,type,!!warning);
+    let prompt=sceFormatCombined(creative,structure,warning,marker,shape);
+    while(prompt.split(/\s+/u).length>250&&creative.layers.length>1){creative.layers.pop();prompt=sceFormatCombined(creative,structure,warning,marker,shape);}
+    const packet={prompt,creative,structure,warning,shape,settings:s,snapshot,words:prompt?prompt.trim().split(/\s+/u).length:0};
     if(!preview)sceCommitPacketHistory(context,packet);
     return packet;
 }
 function structuredCloneSafe(value){return typeof structuredClone==='function'?structuredClone(value):JSON.parse(JSON.stringify(value));}
 function sceCommitPacketHistory(context,p){
     const key=getChatKey(context),old=sceRecentCueHistory.get(key)||[];
-    sceRecentCueHistory.set(key,[...p.creative.layers.map(x=>x.id+':'+x.instruction),...old].slice(0,15));
+    sceRecentCueHistory.set(key,[...(p.creative.disruption?['disruption:'+p.creative.disruption.instruction]:[]),...p.creative.layers.map(x=>x.id+':'+x.instruction),...old].slice(0,15));
     const d=p.creative.layers.find(x=>x.id==='direction');if(d)recentModes.set(key,[d.instruction,...(recentModes.get(key)||[])].slice(0,6));
     if(p.creative.anchor)sceRecentAnchorHistory.set(key,[p.creative.anchor,...(sceRecentAnchorHistory.get(key)||[])].slice(0,5));
     if(p.structure){
@@ -1414,7 +1532,7 @@ function sceRefreshUI(){
     const value=(id,v)=>{const el=sceNode(id);if(el)el.value=String(v);};
     const check=(id,v)=>{const el=sceNode(id);if(el)el.checked=!!v;};
     check('enabled',s.enabled&&s.mode!=='off');check('autopilot',s.autopilotEnabled);check('notify',s.notifyAfterReply);
-    value('preset',scePresetMatch(s));value('palette',s.cuePalette);value('keywords',s.customKeywords);value('hidden_tags',s.hiddenTags);value('mode',s.mode);value('role',s.role);value('scope',s.contextScope);
+    value('preset',scePresetMatch(s));value('palette',s.cuePalette);value('disruption',s.disruption);value('keywords',s.customKeywords);value('hidden_tags',s.hiddenTags);value('mode',s.mode);value('role',s.role);value('scope',s.contextScope);
     check('antirepeat',s.antiRepeat);check('structure_anti_repeat',s.structureAntiRepeat);
     for(const [id,key] of SCE_UI_SLIDERS){value(id,s[key]);const out=sceNode(id+'_out');if(out)out.textContent=s[key]+(id==='layers'?'':'%');}
     for(const [id,key] of [['feedback_window','feedbackWindow'],['ending_window','endingWatchWindow'],['ending_minimum','endingWatchMinimum']])value(id,s[key]);
@@ -1439,6 +1557,7 @@ function sceBindUI(){
     on('autopilot','change',e=>{sceMutate(s=>{s.autopilotEnabled=e.target.checked;if(s.autopilotEnabled){s.enabled=true;s.mode='automatic';}});sceSyncTool();});
     on('apply_preset','click',()=>sceApplyPreset(sceContext(),sceNode('preset').value));
     on('palette','change',e=>sceMutate(s=>{s.cuePalette=SCE_PALETTES.includes(e.target.value)?e.target.value:'neutral';}));
+    on('disruption','change',e=>sceMutate(s=>{s.disruption=SCE_DISRUPTION_LEVELS.includes(e.target.value)?e.target.value:'high';}));
     on('keywords','input',e=>sceMutate(s=>{s.customKeywords=e.target.value.slice(0,2400);}));
     on('hidden_tags','input',e=>sceMutate(s=>{s.hiddenTags=e.target.value.slice(0,2400);}));
     on('notify','change',e=>sceMutate(s=>{s.notifyAfterReply=e.target.checked;}));
@@ -1481,6 +1600,7 @@ function sceInit(){
         '<small>Autopilot supplies defaults. Explicit feature Off overrides are always honored.</small>'+
         '<label for="sce_preset">Creative tuning</label><div class="sce_actions"><select class="text_pole" id="sce_preset"><option value="custom">Custom / current settings</option><option value="subtle">Subtle</option><option value="balanced">Balanced</option><option value="wild">Wild</option></select><button type="button" class="menu_button" id="sce_apply_preset">Apply preset</button></div>'+
         '<label for="sce_palette">Cue palette</label><select class="text_pole" id="sce_palette"><option value="neutral">Neutral (default)</option><option value="intense">Intense</option><option value="everyday">Everyday (1.8.0 cues)</option></select>'+
+        '<label for="sce_disruption">Disruption</label><select class="text_pole" id="sce_disruption"><option value="off">Off</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High (default)</option><option value="max">Max (adds hard reversals)</option></select>'+
         '<small>Neutral and Intense keep the scene’s own tone and skip the Deliberate anti-climax and Elastic time structures plus the humor cues. Intense adds stakes and consequence cues. Everyday restores the 1.8.0 library.</small>'+
         '<label for="sce_keywords">Your optional keywords</label><textarea class="text_pole" id="sce_keywords" rows="3" maxlength="2400" placeholder="coffee, velvet, awkward pause"></textarea>'+
         sceSlider('keywordboost','Keyword influence')+

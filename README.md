@@ -1,8 +1,20 @@
-# Story Chaos Engine 1.8.3
+# Story Chaos Engine 1.8.4
 
 Browser-side creative guidance for SillyTavern. One ordinary model request, one depth-zero injection, no additional inference service, analytics, or API key.
 
-**Release:** 1.8.3 packet-format and tone update on top of the 1.8.0 Structural Entropy expansion, itself based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. The release pull request and its GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.x test results.
+**Release:** 1.8.4 disruption update on top of the 1.8.3 packet-format and tone update, the the 1.8.0 Structural Entropy expansion, itself based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. The release pull request and its GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.x test results.
+
+## What changed in 1.8.4
+
+1.8.3 stopped the engine from deflating tense scenes, but its packets mostly kept the scene's existing pace. 1.8.4 puts the disruption back, and keeps it from deflating.
+
+- **Disruption** setting (Off, Low, Medium, **High** by default, Max). On a share of packets (30%, 55%, 80%, 100%) a `Break:` line names one concrete disruption: an arrival, a forced choice, a fact proving incomplete, a physical cost, a character reversing their own pattern. Breaks escalate, swerve or complicate; none deflate. They are rolled independently of the category weights. **Max** also unlocks hard reversals (an established advantage flips, a belief is shown false, a hard cut).
+- **Pattern-break detection.** When the last four replies share a shape (the same first word, the same kind of ending, all-narration or all-dialogue), a `Change:` line names a different shape. Low and Medium need four of four; High and Max need three of four. Content is never inspected for events.
+- **Three structures that break things:** Rupture, Reversal (Max only) and Tempo shift, for 21 families. At higher disruption they gain weight while Sustained moment, Shift of scale, Narrowing choices and Accumulation recede. Saved weights are never rewritten.
+- **Momentum closings.** With disruption on, the `Close:` line suggests ending mid-motion, on a decision, on a line of dialogue or on a consequence, not "stay with the current activity".
+- **Lean packet.** The opening tone line, the closing "Reply with the fiction turn only" and the "moderate execution" label are gone. The packet is now only the directions.
+
+Existing installations get Disruption High with no panel action.
 
 ## What changed in 1.8.3
 
@@ -14,7 +26,7 @@ Context anchors and optional words no longer pick function-like words such as nu
 
 ## What changed in 1.8.0
 
-Structural Entropy expands from ten to eighteen families. The eight additions have multiple coherent routes through their phases; attention profiles vary how much emphasis each part receives, and selected transition instructions now appear in the injected packet. Existing density, influence, grounding, anti-repeat, and family-weight controls handle the expansion.
+Structural Entropy expands from ten to eighteen families (twenty-one with the 1.8.4 break structures). The eight additions have multiple coherent routes through their phases; attention profiles vary how much emphasis each part receives, and selected transition instructions now appear in the injected packet. Existing density, influence, grounding, anti-repeat, and family-weight controls handle the expansion.
 
 All eleven creative categories, custom keywords, keyword influence, individual weights, context controls, and the User/System injection-role choice remain available. This release focuses on structural variation. Targeted keyword effects and automatic opening-context handling remain separate proposals. `AUDIT-FIXES.md` documents the earlier 1.7.1 corrections retained here.
 
@@ -44,7 +56,7 @@ The script makes a timestamped backup beside the target directory, atomically re
 
 The deployable runtime files are `manifest.json`, `entry.js`, `index.js`, and `style.css`; retain `LICENSE`. A new manual installation can place those in one third-party extension folder. Do not enable two copies. For a manual update from the exact recorded v1.7.1 files, the applier preserves `.git` and unrelated files instead of replacing the whole directory. If it detects modified or newer files, reconcile those changes manually. Keep local changes backed up before using the host's updater again.
 
-Restart/reload SillyTavern and check that the panel says **v1.8.3**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
+Restart/reload SillyTavern and check that the panel says **v1.8.4**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
 
 ## Controls that mean what they say
 

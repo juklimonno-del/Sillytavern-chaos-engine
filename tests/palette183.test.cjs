@@ -20,7 +20,7 @@ test('the packet is a scoped XML block without the old branding, bracket headers
     assert.match(p.prompt,/^<scene_direction id="SCE-9-123">\n/);
     assert.match(p.prompt,/\n<\/scene_direction>$/);
     assert.doesNotMatch(p.prompt,/chaos|\[STORY|\[\/STORY|Lens \[|Optional words|not paragraph counts|Attention: \d|not facts|skip conflicts/i);
-    assert.match(p.prompt,/Hold the scene’s established tone and intensity/);
+    assert.doesNotMatch(p.prompt,/Hold the scene|Honor continuity|Work the cues|Reply with the fiction turn only|, (?:gentle|moderate|strong) execution/);
     assert.ok(p.words<=250);
 });
 

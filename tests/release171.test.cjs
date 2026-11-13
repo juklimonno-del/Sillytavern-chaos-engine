@@ -6,9 +6,9 @@ const {boot,prepare,attachReply,finish,complete,assistant:a,user:u,texted,source
 const obj=x=>JSON.parse(JSON.stringify(x));
 const all=(defs,on=[])=>Object.fromEntries(Object.keys(defs).map(k=>[k,on.includes(k)?3:0]));
 
-test('1.8.3 manifest loads the lifecycle entry point and local-only engine',()=>{
+test('1.8.4 manifest loads the lifecycle entry point and local-only engine',()=>{
     const m=JSON.parse(fs.readFileSync(path.join(__dirname,'..','manifest.json')));
-    assert.equal(m.version,'1.8.3');assert.equal(m.js,'entry.js');assert.equal(m.hooks.disable,'onDisable');
+    assert.equal(m.version,'1.8.4');assert.equal(m.js,'entry.js');assert.equal(m.hooks.disable,'onDisable');
     assert.equal(m.generate_interceptor,'storyChaosEngineInterceptor');assert.doesNotMatch(source,/\bfetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon/);
 });
 test('existing keyword bank, weights, operating mode and role survive migration',()=>{
@@ -60,7 +60,7 @@ test('legacy callbacks look up the current chat instead of registration-time con
 });
 test('random integer helper rejects ranges that would loop forever',()=>{const b=boot();assert.throws(()=>b.api.random(0));assert.throws(()=>b.api.random(0x100000001));assert.ok(b.api.random(1000)<1000);});
 test('disabling all categories prevents all legacy creative fields and fallback directions',()=>{
-    const b=boot();Object.assign(b.api.settings(b.context),{categoryWeights:all(b.api.categories),customKeywords:'',contextGravity:0});
+    const b=boot({disruption:'off'});Object.assign(b.api.settings(b.context),{categoryWeights:all(b.api.categories),customKeywords:'',contextGravity:0});
     for(let i=0;i<30;i++){
         const r=b.api.creative(b.context,true);assert.equal(r.layers.length,0);assert.equal(r.word_sparks.length,0);
         assert.equal(r.focus,undefined);assert.equal(r.rhythm,undefined);assert.equal(r.wildcard,undefined);
@@ -97,7 +97,7 @@ test('preview includes the same eligible closing-watch section without consuming
 });
 test('the compact packet stays bounded with all features and maximum lenses',()=>{
     const b=boot({autopilotEnabled:true,intensity:100,maxLayers:5,structureInfluence:95,beatDensity:100},texted());
-    for(let i=0;i<40;i++){const p=b.api.packet(b.context,true);assert.ok(p.words<=250,'words='+p.words);assert.match(p.prompt,/Honor continuity/);}
+    for(let i=0;i<40;i++){const p=b.api.packet(b.context,true);assert.ok(p.words<=250,'words='+p.words);assert.match(p.prompt,/<\/scene_direction>$/);assert.doesNotMatch(p.prompt,/Honor continuity|Hold the scene|Reply with the fiction turn only|execution\./);}
 });
 test('pacing lenses refine, rather than contradict, selected architecture',()=>{
     const b=boot({structureEnabled:true,intensity:0});b.api.settings(b.context).categoryWeights=all(b.api.categories,['pacing']);
