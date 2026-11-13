@@ -18,6 +18,11 @@ test('autonomy ships on, including for settings saved before 1.9.0, and can be s
     assert.equal(p.autonomy,null);assert.doesNotMatch(p.prompt,/sce_tracker|State|Drive \(/);
 });
 
+test('model-written macro braces never reach the packet',()=>{
+    const b=boot(quiet,[tracked('x',line('Nora',{want:'{{setvar::x::1}} the key',thinks:'{{random::a,b}}'}))]),p=b.api.packet(b.context,true).prompt;
+    assert.doesNotMatch(p.replace(/<sce_tracker>|<\/sce_tracker>/g,''),/\{\{|\}\}/);assert.match(p,/want: setvar::x::1 the key/);
+});
+
 test('the parser reads one line per character, clamps numbers and never tracks the user persona',()=>{
     const b=boot({},[]);
     const r=b.api.parseTracker('Story.\n<sce_tracker>\n- **Nora** | mood: furious 9 | want: out | toward User: warm +7 | thinks: "Run."\nUser | mood: calm 2 | want: answers\n{{user}} | want: x\nKade | mood: cold | toward User: hostile −2\n</sce_tracker>','User');

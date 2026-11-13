@@ -926,7 +926,8 @@ const SCE_DRIVE_HISTORY = new SceBoundedMap();
 
 function sceAutonomyOn(s){return !!(s?.enabled&&s.mode!=='off'&&s.autonomyEnabled);}
 function sceUserName(context){const n=typeof context?.name1==='string'?context.name1.trim():'';return n&&n.length<=80?n:'the user';}
-function sceTrackerClip(text){return String(text).replace(/\s+/gu,' ').replace(/^["“'*_\s]+|["”'*_\s]+$/gu,'').trim().slice(0,SCE_AUTONOMY_FIELD_MAX);}
+// Packets pass through the host's macro substitution, so model-written braces are neutralized.
+function sceTrackerClip(text){return String(text).replace(/\{\{|\}\}/gu,'').replace(/\s+/gu,' ').replace(/^["“'*_\s]+|["”'*_\s]+$/gu,'').trim().slice(0,SCE_AUTONOMY_FIELD_MAX);}
 function sceTrackerNumber(text,lo,hi){
     const m=String(text).replace(/[−–—]/gu,'-').match(/([+-]?\d+)\s*(?:\/\s*\d+)?\s*\)?\s*$/u);
     if(!m)return {word:sceTrackerClip(text),value:null};
@@ -1059,8 +1060,8 @@ function sceAutonomyStripChat(chat,s){
     if(!Array.isArray(chat)||!sceAutonomyOn(s))return 0;let n=0;
     for(let i=0;i<chat.length;i++){
         const m=chat[i];if(!m||m.is_user!==false||typeof m.mes!=='string'||!/sce_tracker/iu.test(m.mes))continue;
-        // The host passes shared message objects: replace the array slot with a clone, never edit the saved message.
-        const copy=structuredCloneSafe(m);copy.mes=sceStripTracker(m.mes);chat[i]=copy;n++;
+        // Current hosts already pass per-request copies; replacing the slot keeps older hosts' saved messages safe too.
+        chat[i]={...m,mes:sceStripTracker(m.mes)};n++;
     }
     return n;
 }
