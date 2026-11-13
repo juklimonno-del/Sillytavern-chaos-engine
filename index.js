@@ -1,7 +1,7 @@
 // Story Chaos Engine v1.8.4. Browser-only; no extra model calls or telemetry.
 // Pure selection/analysis helpers are kept separate from the host lifecycle below.
 'use strict';
-const SCE_VERSION = '1.9.0';
+const SCE_VERSION = '1.9.1';
 const SCE_SETTINGS_KEY = 'storyChaosEngine';
 const SCE_PROMPT_ID = 'story_chaos_engine_auto';
 const SCE_FEATURES = ['structureEnabled', 'feedbackObserverEnabled', 'feedbackBalancerEnabled', 'endingWatchEnabled'];
@@ -908,7 +908,7 @@ function sceShapeWatch(context=sceContext(),type='normal',closingWatchActive=fal
     if(clean.every(x=>share(x)>.6))found.push({trait:'narration',text:'Let action and description carry this reply, with little speech.'});
     return found.length?pick(found):null;
 }
-// Character autonomy (1.9.0). The model writes a compact <sce_tracker> ledger after each reply.
+// Character autonomy (1.9.0). The model writes a compact [sce_tracker] ledger after each reply (the <sce_tracker> form is still read).
 // State is always derived from the surviving chat, never stored separately, so swipes, edits,
 // deletions and branches roll it back for free, and editing a tracker by hand edits the state.
 // The user's own persona is never tracked or driven.
@@ -969,7 +969,8 @@ function sceParseTracker(text,user='the user'){
     }
     return actors.length?actors:null;
 }
-function sceStripTracker(text){return String(text??'').replace(SCE_TRACKER_STRIP,'').replace(/\s+$/u,'');}
+// Also drops a dangling '<sce_' or '</sce_' left when SillyTavern's Trim Incomplete Sentences cut an XML-form ledger.
+function sceStripTracker(text){return String(text??'').replace(SCE_TRACKER_STRIP,'').replace(/\s*<\/?sce(?:_[a-z]*)?\s*$/iu,'').replace(/\s+$/u,'');}
 function sceMessageLedger(message,user){
     const raw=String(message?.mes??''),hit=SCE_AUTONOMY_LEDGER_CACHE.get(message);
     if(hit&&hit.raw===raw&&hit.user===user)return hit.ledger;
@@ -1039,8 +1040,10 @@ function sceStateLine(a,user){
     return 'State ('+a.name+'): '+bits.join(' · ')+'.';
 }
 function sceTrackerInstruction(user,continuing=false){
-    return (continuing?'Ledger: continue the reply from where it stops, then end it with a fresh <sce_tracker>':'Ledger: after the reply, write <sce_tracker>')+', one line per character present except '+user+
-        ' — Name | mood: word 1-5 | feels: feeling → target | want: their goal in this scene | desire: their own long goal | toward '+user+': word -3 to +3 | thinks: one private line — then </sce_tracker>.';
+    // Bracket form on purpose: SillyTavern's Trim Incomplete Sentences cuts back to the last '_' in '</sce_tracker>',
+    // while a closing ']' counts as sentence-ending punctuation and survives. Both forms are still parsed.
+    return (continuing?'Ledger: continue the reply from where it stops, then end it with a fresh [sce_tracker]':'Ledger: after the reply, write [sce_tracker]')+', one line per character present except '+user+
+        ' — Name | mood: word 1-5 | feels: feeling → target | want: their goal in this scene | desire: their own long goal | toward '+user+': word -3 to +3 | thinks: one private line — then close it with [/sce_tracker].';
 }
 function sceAutonomyRoll(context=sceContext(),type='normal'){
     const s=context?._sceSettings||sceSettings(context);
@@ -1068,7 +1071,7 @@ function sceContinuePacket(context=sceContext(),marker=''){
 function sceAutonomyStripChat(chat,s){
     if(!Array.isArray(chat)||!sceAutonomyOn(s))return 0;let n=0;
     for(let i=0;i<chat.length;i++){
-        const m=chat[i];if(!m||m.is_user!==false||typeof m.mes!=='string'||!/sce_tracker/iu.test(m.mes))continue;
+        const m=chat[i];if(!m||m.is_user!==false||typeof m.mes!=='string'||!/sce_tracker|<\/?sce(?:_[a-z]*)?\s*$/iu.test(m.mes))continue;
         // Current hosts already pass per-request copies; replacing the slot keeps older hosts' saved messages safe too.
         chat[i]={...m,mes:sceStripTracker(m.mes)};n++;
     }
