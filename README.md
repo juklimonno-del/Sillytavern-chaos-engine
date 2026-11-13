@@ -1,14 +1,22 @@
-# Story Chaos Engine 1.9.0
+# Story Chaos Engine 1.9.1
 
 Browser-side creative guidance for SillyTavern. One ordinary model request, one depth-zero injection, no additional inference service, analytics, or API key.
 
-**Release:** 1.9.0 character autonomy update on top of the 1.8.4 disruption update, the 1.8.3 packet-format and tone update, and the 1.8.0 Structural Entropy expansion, itself based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. The release pull request and its GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.x or 1.9.x test results.
+**Release:** 1.9.1 ledger fix for the 1.9.0 character autonomy update, on top of the 1.8.4 disruption update, the 1.8.3 packet-format and tone update, and the 1.8.0 Structural Entropy expansion, itself based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. The release pull request and its GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.x or 1.9.x test results.
+
+## What changed in 1.9.1
+
+With SillyTavern's **Trim Incomplete Sentences** on, 1.9.0 replies ended in a stray `<sce_` or `</sce_`. The trimmer treats `_` as sentence-ending punctuation and cut the ledger at the underscore in its tag.
+
+- The ledger is now requested in bracket form, `[sce_tracker]` … `[/sce_tracker]`. The closing `]` counts as punctuation, so the whole ledger survives trimming.
+- Ledgers already cut in 1.9.0 chats still supply state when their lines survived, and a dangling `<sce_` / `</sce_` is removed from the outgoing request.
+- The `<sce_tracker>` form is still read, so older replies keep working.
 
 ## What changed in 1.9.0
 
 Characters now carry their own state and act on it. The engine still makes one ordinary request with one depth-zero injection.
 
-- **Ledger.** The packet asks the model to end each reply with a `<sce_tracker>` block, one line per character present:
+- **Ledger.** The packet asks the model to end each reply with a `[sce_tracker]` block (bracket form since 1.9.1), one line per character present:
   `Name | mood: word 1-5 | feels: feeling → target | want: scene goal | desire: own long goal | toward User: word -3 to +3 | thinks: one private line`.
   Your persona is never tracked or driven.
 - **State without storage.** The current state is read from the newest surviving reply that has a tracker. Swipes, edits, deletions and branches roll it back automatically, and editing a tracker by hand edits the state. Old trackers are removed from the outgoing request (saved messages are untouched); the newest state rides in the packet as `State (Name):` lines, at most three characters.
@@ -54,7 +62,7 @@ The everyday panel has an **Engine enabled** master switch, **Autopilot**, your 
 
 The normal updater follows the installed repository branch. Use `main` for published releases. Back up local modifications before updating.
 
-Use SillyTavern's Extension Manager to install or update from [juklimonno-del/Sillytavern-chaos-engine](https://github.com/juklimonno-del/Sillytavern-chaos-engine), reload SillyTavern, and confirm that both the installed manifest and panel show **1.9.0**.
+Use SillyTavern's Extension Manager to install or update from [juklimonno-del/Sillytavern-chaos-engine](https://github.com/juklimonno-del/Sillytavern-chaos-engine), reload SillyTavern, and confirm that both the installed manifest and panel show **1.9.1**.
 
 ### Optional manual update from the recorded 1.7.1 files
 
@@ -74,7 +82,7 @@ The script makes a timestamped backup beside the target directory, atomically re
 
 The deployable runtime files are `manifest.json`, `entry.js`, `index.js`, and `style.css`; retain `LICENSE`. A new manual installation can place those in one third-party extension folder. Do not enable two copies. For a manual update from the exact recorded v1.7.1 files, the applier preserves `.git` and unrelated files instead of replacing the whole directory. If it detects modified or newer files, reconcile those changes manually. Keep local changes backed up before using the host's updater again.
 
-Restart/reload SillyTavern and check that the panel says **v1.9.0**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
+Restart/reload SillyTavern and check that the panel says **v1.9.1**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
 
 ## Controls that mean what they say
 

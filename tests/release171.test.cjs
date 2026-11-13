@@ -6,9 +6,9 @@ const {boot,prepare,attachReply,finish,complete,assistant:a,user:u,texted,source
 const obj=x=>JSON.parse(JSON.stringify(x));
 const all=(defs,on=[])=>Object.fromEntries(Object.keys(defs).map(k=>[k,on.includes(k)?3:0]));
 
-test('1.9.0 manifest loads the lifecycle entry point and local-only engine',()=>{
+test('1.9.1 manifest loads the lifecycle entry point and local-only engine',()=>{
     const m=JSON.parse(fs.readFileSync(path.join(__dirname,'..','manifest.json')));
-    assert.equal(m.version,'1.9.0');assert.equal(m.js,'entry.js');assert.equal(m.hooks.disable,'onDisable');
+    assert.equal(m.version,'1.9.1');assert.equal(m.js,'entry.js');assert.equal(m.hooks.disable,'onDisable');
     assert.equal(m.generate_interceptor,'storyChaosEngineInterceptor');assert.doesNotMatch(source,/\bfetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon/);
 });
 test('existing keyword bank, weights, operating mode and role survive migration',()=>{

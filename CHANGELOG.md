@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.9.1 — November 13, 2026
+
+Ledger fix. No other behavior change.
+
+- Request the ledger as `[sce_tracker]` … `[/sce_tracker]`. SillyTavern's Trim Incomplete Sentences treats `_` as punctuation and cut `</sce_tracker>` to `</sce_` (or, when the model left the block unclosed, cut the whole ledger back to `<sce_`). A closing `]` is punctuation, so the bracket form survives intact.
+- Keep parsing the `<sce_tracker>` form, including ledgers whose closing tag was cut.
+- Remove a dangling `<sce_` / `</sce_` fragment from the outgoing request.
+- Add tests that run SillyTavern 1.19.0's `trimToEndSentence` over both forms.
+
 ## 1.9.0 — November 13, 2026
 
 Character autonomy release. No change to completion receipts, learning, or saved chat data.
