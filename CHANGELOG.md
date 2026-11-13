@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.8.4 — November 12, 2026
+
+Disruption release. No change to host lifecycle, completion receipts, learning, or storage.
+
+- Add a **Disruption** setting (Off, Low, Medium, High, Max; High by default, applied to existing installations). A `Break:` line names one concrete disruption on 30%, 55%, 80% or 100% of packets. Breaks never deflate and are independent of category weights. Max adds hard reversals.
+- Add pattern-break detection. When recent replies repeat one opening word, ending kind or speech/narration balance, a `Change:` line names a different shape.
+- Add the Rupture, Reversal and Tempo shift structure families (21 in all). Break families gain weight and static ones recede with the disruption level; Reversal needs Max. Saved weights are not rewritten.
+- With disruption on, closing suggestions favor momentum over staying with the current activity (Neutral and Intense palettes; Everyday keeps the 1.8.0 closings).
+- Remove the opening tone line, the closing "Reply with the fiction turn only" and the execution label from the packet.
+- Add `tests/disruption184.test.cjs`. Update packet and family-count assertions in the existing suites.
+
 ## 1.8.3 — November 12, 2026
 
 Packet format and tone release. No change to host lifecycle, completion receipts, learning, or storage.

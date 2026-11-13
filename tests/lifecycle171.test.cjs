@@ -9,7 +9,7 @@ test('automatic mode installs one combined depth-zero user prompt',async()=>{
 });
 test('system-role override is preserved',async()=>{const b=boot({role:'system'});await prepare(b);assert.equal(b.injections[0][5],0);});
 test('legacy tool calls retain recency without treating previews or tool output as completed replies',async()=>{
-    const b=boot({mode:'tool',intensity:0,structureEnabled:true,feedbackObserverEnabled:true,feedbackBalancerEnabled:true});
+    const b=boot({mode:'tool',intensity:0,disruption:'off',structureEnabled:true,feedbackObserverEnabled:true,feedbackBalancerEnabled:true});
     const s=b.api.settings(b.context),key=b.api.key(b.context);
     s.categoryWeights=Object.fromEntries(Object.keys(b.api.categories).map(id=>[id,id==='direction'?3:0]));
     const history=()=>JSON.stringify({cues:b.api.cueHistory.get(key)||[],structures:b.api.structureHistory.get(key)||[]});
