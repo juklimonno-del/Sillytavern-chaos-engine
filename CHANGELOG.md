@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.2 — November 15, 2026
+
+Placement update. No change to receipts, learning or saved chat data.
+
+- Move the fixed ledger format into a second extension prompt (`story_chaos_engine_ledger`, in-prompt position, system role) so it is identical every turn and cacheable. The per-turn packet carries a one-line cue instead. The format prompt is cleared for quiet and impersonate requests and whenever autonomy is off.
+- Add a **Packet placement** setting: Auto (default; depth 1 for Google AI Studio and Vertex AI chat completion, depth 0 otherwise), Last in prompt (depth 0), Before your message (depth 1). Continue keeps depth 0.
+- Update lifecycle tests to select the packet injection by id.
+
+## 1.9.1 — November 13, 2026
+
+Ledger fix. No other behavior change.
+
+- Request the ledger as `[sce_tracker]` … `[/sce_tracker]`. SillyTavern's Trim Incomplete Sentences treats `_` as punctuation and cut `</sce_tracker>` to `</sce_` (or, when the model left the block unclosed, cut the whole ledger back to `<sce_`). A closing `]` is punctuation, so the bracket form survives intact.
+- Keep parsing the `<sce_tracker>` form, including ledgers whose closing tag was cut.
+- Remove a dangling `<sce_` / `</sce_` fragment from the outgoing request.
+- Add tests that run SillyTavern 1.19.0's `trimToEndSentence` over both forms.
+
 ## 1.9.0 — November 13, 2026
 
 Character autonomy release. No change to completion receipts, learning, or saved chat data.

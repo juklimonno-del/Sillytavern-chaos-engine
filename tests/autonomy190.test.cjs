@@ -20,7 +20,7 @@ test('autonomy ships on, including for settings saved before 1.9.0, and can be s
 
 test('model-written macro braces never reach the packet',()=>{
     const b=boot(quiet,[tracked('x',line('Nora',{want:'{{setvar::x::1}} the key',thinks:'{{random::a,b}}'}))]),p=b.api.packet(b.context,true).prompt;
-    assert.doesNotMatch(p.replace(/<sce_tracker>|<\/sce_tracker>/g,''),/\{\{|\}\}/);assert.match(p,/want: setvar::x::1 the key/);
+    assert.doesNotMatch(p,/\{\{|\}\}/);assert.match(p,/want: setvar::x::1 the key/);
 });
 
 test('the parser reads one line per character, clamps numbers and never tracks the user persona',()=>{
@@ -37,8 +37,8 @@ test('the parser reads one line per character, clamps numbers and never tracks t
 test('without a ledger the packet seeds wants from the character’s own life and asks for one',()=>{
     const b=boot(quiet,[a('Nora waited at the docks.')]),p=b.api.packet(b.context,true);
     assert.match(p.prompt,/State: no ledger yet\. .*their own life.*not from User\./);
-    assert.match(p.prompt,/Ledger: after the reply, write <sce_tracker>, one line per character present except User/);
-    assert.match(p.prompt,/Ledger:[^\n]+<\/sce_tracker>\.\n<\/scene_direction>$/);
+    assert.match(p.prompt,/Ledger: end the reply with \[sce_tracker\] … \[\/sce_tracker\] as specified\./);
+    assert.match(p.prompt,/Ledger:[^\n]+as specified\.\n<\/scene_direction>$/);
 });
 
 test('state comes from the newest surviving tracker; swipes, edits and deletions roll it back',()=>{
@@ -147,7 +147,7 @@ test('continue mode drops the old ledger from the continued reply and asks for a
     b.events.emit('GENERATION_STARTED','continue',{},false);
     await b.scope.storyChaosEngineInterceptor(outgoing,8192,()=>{},'continue');
     const prompt=b.injections.at(-1)[1];
-    assert.match(prompt,/^<scene_direction id="SCE-[^"]+">\nState \(Nora\): [^\n]*want: a boat out[^\n]*\nLedger: continue the reply from where it stops, then end it with a fresh <sce_tracker>, one line per character present except User[^\n]*\n<\/scene_direction>$/);
+    assert.match(prompt,/^<scene_direction id="SCE-[^"]+">\nState \(Nora\): [^\n]*want: a boat out[^\n]*\nLedger: continue the reply from where it stops, then end it with a fresh \[sce_tracker\] … \[\/sce_tracker\] as specified\.\n<\/scene_direction>$/);
     assert.doesNotMatch(prompt,/^(?:Break|Change|Form|Lens|Drive|Close|Stance|Want|Desire|Stall)/m,'a continuation adds no new pressure');
     assert.deepEqual(b.context.chat.map(m=>m.mes),saved,'saved chat is unchanged before the host merges');
     assert.equal(outgoing.at(-1).mes,'Nora reached for the');
@@ -169,4 +169,59 @@ test('continue without a ledger yet still asks for one; continue with autonomy o
     b=boot({enabled:false},[tracked('Nora reached for the',line('Nora'))]);
     await b.scope.storyChaosEngineInterceptor([...b.context.chat],8192,()=>{},'continue');
     assert.equal(b.injections.at(-1)?.[1]??'','');
+});
+
+// SillyTavern 1.19.0 utils.js trimToEndSentence, used when "Trim Incomplete Sentences" is on.
+function stTrimToEndSentence(input){
+    const isEmoji=x=>/(\p{Emoji_Presentation}|\p{Extended_Pictographic})/gu.test(x);
+    const punctuation=new Set(['.','!','?','*','"',')','}','`',']','$','。','！','？','”','）','】','’','」','_']);
+    let last=-1;const characters=Array.from(input);
+    for(let i=characters.length-1;i>=0;i--){const char=characters[i],emoji=isEmoji(char);
+        if(punctuation.has(char)||emoji){last=!emoji&&i>0&&/[\s\n]/.test(characters[i-1])?i-1:i;break;}}
+    return last===-1?input.trimEnd():characters.slice(0,last+1).join('').trimEnd();
+}
+
+test('the requested bracket ledger survives Trim Incomplete Sentences; the XML form did not',()=>{
+    const reply='Nora pocketed the key.\n\n[sce_tracker]\n'+line('Nora',{thinks:'He knows'})+'\n[/sce_tracker]';
+    assert.equal(stTrimToEndSentence(reply),reply);
+    const b=boot(quiet,[a(stTrimToEndSentence(reply))]);
+    assert.match(b.api.packet(b.context,true).prompt,/State \(Nora\): [^\n]*want: the ledger before dawn/);
+    const xml='Nora pocketed the key.\n\n<sce_tracker>\n'+line('Nora',{thinks:'He knows'})+'\n</sce_tracker>';
+    assert.match(stTrimToEndSentence(xml),/<\/sce_$/,'the 1.9.0 failure this release fixes');
+});
+
+test('ledgers already cut by trimming still parse, and dangling fragments leave the outgoing history',async()=>{
+    const cutClosing='Nora waited.\n<sce_tracker>\n'+line('Nora',{want:'the far bank'})+'\n</sce_';
+    const cutOpening='Nora moved.\n\n<sce_';
+    const b=boot(quiet,chatOf(a(cutClosing),a(cutOpening))),outgoing=[...b.context.chat];
+    assert.match(b.api.packet(b.context,true).prompt,/want: the far bank/,'a cut XML ledger still supplies state');
+    b.events.emit('GENERATION_STARTED','normal',{},false);
+    await b.scope.storyChaosEngineInterceptor(outgoing,8192,()=>{},'normal');
+    assert.equal(outgoing[0].mes,'Nora waited.');assert.equal(outgoing[2].mes,'Nora moved.');
+});
+
+const PACKET='story_chaos_engine_auto',SPEC='story_chaos_engine_ledger';
+const last=(b,id)=>b.injections.filter(x=>x[0]===id).at(-1);
+const gemini=(b,source='makersuite')=>{b.context.mainApi='openai';b.context.chatCompletionSettings={...(b.context.chatCompletionSettings||{}),chat_completion_source:source};};
+
+test('the fixed ledger format rides with the system prompt; the packet only carries a short cue',async()=>{
+    const b=boot(quiet,[tracked('x',line('Nora'))]);await prepare(b);
+    const spec=last(b,SPEC);assert.equal(spec[2],0,'in-prompt position');assert.equal(spec[5],0,'system role');
+    assert.match(spec[1],/^Character ledger: end every reply with \[sce_tracker\], one line per character present except User — Name \| mood: word 1-5 .* close it with \[\/sce_tracker\]\. Wants and desires come from each character’s own life, not from User\.$/);
+    assert.doesNotMatch(last(b,PACKET)[1],/mood: word 1-5/);
+    const first=spec[1];await prepare(b);assert.equal(last(b,SPEC)[1],first,'identical every turn so it stays cached');
+    for(const type of ['quiet','impersonate']){await prepare(b,type);assert.equal(last(b,SPEC)[1],'',type);}
+    await prepare(b,'continue');assert.equal(last(b,SPEC)[1],first);
+    const off=boot({autonomyEnabled:false});await prepare(off);assert.equal(last(off,SPEC)[1],'');
+});
+
+test('packet placement: auto puts Gemini before the user message and keeps others last; overrides win',async()=>{
+    let b=boot({});await prepare(b);assert.equal(last(b,PACKET)[3],0);
+    for(const source of ['makersuite','vertexai']){b=boot({});gemini(b,source);await prepare(b);assert.equal(last(b,PACKET)[3],1,source);}
+    b=boot({});gemini(b,'openrouter');await prepare(b);assert.equal(last(b,PACKET)[3],0);
+    b=boot({packetPlacement:'last'});gemini(b);await prepare(b);assert.equal(last(b,PACKET)[3],0);
+    b=boot({packetPlacement:'before_user'});await prepare(b);assert.equal(last(b,PACKET)[3],1);
+    b=boot({packetPlacement:'sideways'});assert.equal(b.api.settings(b.context).packetPlacement,'auto');
+    b=boot({packetPlacement:'before_user'},[tracked('Nora reached for the',line('Nora'))]);gemini(b);await prepare(b,'continue');
+    assert.equal(last(b,PACKET)[3],0,'continue keeps the continued reply last');
 });
