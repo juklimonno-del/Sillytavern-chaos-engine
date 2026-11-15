@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.2 — November 15, 2026
+
+Placement update. No change to receipts, learning or saved chat data.
+
+- Move the fixed ledger format into a second extension prompt (`story_chaos_engine_ledger`, in-prompt position, system role) so it is identical every turn and cacheable. The per-turn packet carries a one-line cue instead. The format prompt is cleared for quiet and impersonate requests and whenever autonomy is off.
+- Add a **Packet placement** setting: Auto (default; depth 1 for Google AI Studio and Vertex AI chat completion, depth 0 otherwise), Last in prompt (depth 0), Before your message (depth 1). Continue keeps depth 0.
+- Update lifecycle tests to select the packet injection by id.
+
 ## 1.9.1 — November 13, 2026
 
 Ledger fix. No other behavior change.

@@ -1,9 +1,12 @@
 // Story Chaos Engine v1.8.4. Browser-only; no extra model calls or telemetry.
 // Pure selection/analysis helpers are kept separate from the host lifecycle below.
 'use strict';
-const SCE_VERSION = '1.9.1';
+const SCE_VERSION = '1.9.2';
 const SCE_SETTINGS_KEY = 'storyChaosEngine';
 const SCE_PROMPT_ID = 'story_chaos_engine_auto';
+// Static ledger format, placed with the system prompt so it is read once and cached; only per-turn lines ride in the packet.
+const SCE_LEDGER_PROMPT_ID = 'story_chaos_engine_ledger';
+const SCE_PLACEMENTS = ['auto','last','before_user'];
 const SCE_FEATURES = ['structureEnabled', 'feedbackObserverEnabled', 'feedbackBalancerEnabled', 'endingWatchEnabled'];
 const SCE_PRESETS = Object.freeze({
     subtle: {intensity:35,maxLayers:2,structureInfluence:55,beatDensity:40,contextGravity:80},
@@ -447,6 +450,7 @@ function sceSettings(context=sceContext()) {
     if(!['automatic','tool','off'].includes(s.mode))s.mode='automatic';
     if(typeof s.enabled!=='boolean')s.enabled=s.mode!=='off';
     if(!['user','system'].includes(s.role))s.role='user';
+    if(!SCE_PLACEMENTS.includes(s.packetPlacement))s.packetPlacement='auto';
     for(const [key,value] of Object.entries({...SCE_ADV_DEFAULTS,...SCE_STRUCTURE_DEFAULTS,...SCE_FEEDBACK_DEFAULTS,...SCE_ENDING_WATCH_DEFAULTS}))
         if(s[key]===undefined)s[key]=value;
     // Autonomy ships on, including for settings saved before 1.9.0.
@@ -1039,11 +1043,15 @@ function sceStateLine(a,user){
             Number.isFinite(a.towardLevel)?'toward '+user+': '+(a.towardLevel>0?'+':'')+a.towardLevel:null].filter(Boolean);
     return 'State ('+a.name+'): '+bits.join(' · ')+'.';
 }
-function sceTrackerInstruction(user,continuing=false){
-    // Bracket form on purpose: SillyTavern's Trim Incomplete Sentences cuts back to the last '_' in '</sce_tracker>',
-    // while a closing ']' counts as sentence-ending punctuation and survives. Both forms are still parsed.
-    return (continuing?'Ledger: continue the reply from where it stops, then end it with a fresh [sce_tracker]':'Ledger: after the reply, write [sce_tracker]')+', one line per character present except '+user+
-        ' — Name | mood: word 1-5 | feels: feeling → target | want: their goal in this scene | desire: their own long goal | toward '+user+': word -3 to +3 | thinks: one private line — then close it with [/sce_tracker].';
+// Bracket form on purpose: SillyTavern's Trim Incomplete Sentences cuts back to the last '_' in '</sce_tracker>',
+// while a closing ']' counts as sentence-ending punctuation and survives. Both forms are still parsed.
+function sceLedgerSpec(user){
+    return 'Character ledger: end every reply with [sce_tracker], one line per character present except '+user+
+        ' — Name | mood: word 1-5 | feels: feeling → target | want: their goal in this scene | desire: their own long goal | toward '+user+': word -3 to +3 | thinks: one private line — then close it with [/sce_tracker]. Wants and desires come from each character’s own life, not from '+user+'.';
+}
+function sceTrackerInstruction(_user,continuing=false){
+    return continuing?'Ledger: continue the reply from where it stops, then end it with a fresh [sce_tracker] … [/sce_tracker] as specified.'
+        :'Ledger: end the reply with [sce_tracker] … [/sce_tracker] as specified.';
 }
 function sceAutonomyRoll(context=sceContext(),type='normal'){
     const s=context?._sceSettings||sceSettings(context);
@@ -1373,7 +1381,12 @@ const SCE_RUN_RECEIPTS=new SceBoundedMap();
 let sceLifecycleStart=null,sceActiveRun=null,sceRunCounter=0,sceRuntimeEnabled=true;
 let sceListeningSource=null,sceListeners=[],sceUiInitObserver=null,sceBootstrapTimer=null;
 let sceToolRegistered=false,sceFinishTimer=null;
-function sceClearPrompt(context=sceContext()) {context?.setExtensionPrompt?.(SCE_PROMPT_ID,'',1,0,false,1);}
+function sceClearPrompt(context=sceContext()) {context?.setExtensionPrompt?.(SCE_LEDGER_PROMPT_ID,'',0,0,false,0);context?.setExtensionPrompt?.(SCE_PROMPT_ID,'',1,0,false,1);}
+// Gemini receives mid-chat system turns as user text, so by default the packet sits just before the user's message
+// and the user's own action is the last thing the model reads. Other sources keep the packet last.
+function sceGoogleSource(context){return context?.mainApi==='openai'&&['makersuite','vertexai'].includes(context?.chatCompletionSettings?.chat_completion_source);}
+function scePacketDepth(context,s){const p=s?.packetPlacement;return p==='before_user'?1:p==='last'?0:sceGoogleSource(context)?1:0;}
+function sceSetLedgerSpec(context,s){context.setExtensionPrompt(SCE_LEDGER_PROMPT_ID,sceAutonomyOn(s)?sceLedgerSpec(sceUserName(context)):'',0,0,false,0);}
 function sceSafeClear(context=sceContext()){try{sceClearPrompt(context);}catch(error){console.warn('[Story Chaos Engine] Unable to clear the host prompt.',error);}}
 function sceRunReceipt(context=sceContext()){return SCE_RUN_RECEIPTS.get(getChatKey(context))||null;}
 function sceSetReceipt(context,receipt){if(receipt)SCE_RUN_RECEIPTS.set(getChatKey(context),receipt);else SCE_RUN_RECEIPTS.delete(getChatKey(context));sceRenderReceipt(context);}
@@ -1591,6 +1604,8 @@ globalThis.storyChaosEngineInterceptor=async function(chat,_contextSize,_abort,t
         if(kind==='continue'&&sceRuntimeEnabled&&settings.enabled&&settings.mode==='automatic'&&sceAutonomyOn(settings)){
             const prompt=sceContinuePacket(context,'SCE-'+(++sceRunCounter)+'-'+randomInt(1000000));
             sceAutonomyStripChat(chat,settings);
+            sceSetLedgerSpec(context,settings);
+            // Continue stays last: the reply being continued must remain the final turn.
             context.setExtensionPrompt(SCE_PROMPT_ID,prompt,1,0,false,settings.role==='system'?0:1);
             return;
         }
@@ -1608,7 +1623,8 @@ globalThis.storyChaosEngineInterceptor=async function(chat,_contextSize,_abort,t
         // Old ledgers leave the outgoing history; the newest state rides in the packet instead.
         sceAutonomyStripChat(chat,packet.settings);
         // Preparation is synchronous. One atomic replacement, or a clear in the failure handler.
-        context.setExtensionPrompt(SCE_PROMPT_ID,packet.prompt,1,0,false,settings.role==='system'?0:1);
+        sceSetLedgerSpec(context,packet.settings);
+        context.setExtensionPrompt(SCE_PROMPT_ID,packet.prompt,1,scePacketDepth(context,packet.settings),false,settings.role==='system'?0:1);
         const run={id,key:getChatKey(context),type:kind,started,targetIndex,state:'prepared',prompt:packet.prompt,packet:{creative:packet.creative,structure:packet.structure,autonomy:packet.autonomy},
             settings:packet.settings,layers:packet.creative.layers.length,family:packet.structure?.family||null,
             familyId:packet.structure?.familyId||null,observer:sceOn(packet.settings,'feedbackObserverEnabled'),
@@ -1671,6 +1687,7 @@ function sceAdvancedUI(panel){
         '<label for="sce_mode">Operating mode</label><select class="text_pole" id="sce_mode"><option value="automatic">Automatic injection</option><option value="tool">Legacy function calling</option><option value="off">Off</option></select>'+
         '<small id="sce_legacy_note">Legacy mode requires provider tool support and has no verified completion receipts.</small>'+
         '<label for="sce_role">Injection role</label><select class="text_pole" id="sce_role"><option value="user">User</option><option value="system">System</option></select>'+
+        '<label for="sce_placement">Packet placement</label><select class="text_pole" id="sce_placement"><option value="auto">Auto (Gemini: before your message; others: last)</option><option value="last">Last in prompt (depth 0)</option><option value="before_user">Before your message (depth 1)</option></select>'+
         sceSlider('intensity','Creative randomness')+sceSlider('layers','Maximum creative lenses',1,5)+sceSlider('gravity','Context gravity')+
         '<label for="sce_scope">Context window</label><select class="text_pole" id="sce_scope"><option value="full">Available history (bounded)</option><option value="recent">Recent 16 story messages</option></select>'+
         '<details class="sce_group"><summary>Creative category weights</summary>'+sceWeightControls(SCE_CATEGORIES,'cat_')+'</details>'+
@@ -1715,7 +1732,7 @@ function sceRefreshUI(){
     const value=(id,v)=>{const el=sceNode(id);if(el)el.value=String(v);};
     const check=(id,v)=>{const el=sceNode(id);if(el)el.checked=!!v;};
     check('enabled',s.enabled&&s.mode!=='off');check('autonomy',s.autonomyEnabled);check('autopilot',s.autopilotEnabled);check('notify',s.notifyAfterReply);
-    value('preset',scePresetMatch(s));value('palette',s.cuePalette);value('disruption',s.disruption);value('keywords',s.customKeywords);value('hidden_tags',s.hiddenTags);value('mode',s.mode);value('role',s.role);value('scope',s.contextScope);
+    value('preset',scePresetMatch(s));value('palette',s.cuePalette);value('disruption',s.disruption);value('keywords',s.customKeywords);value('hidden_tags',s.hiddenTags);value('mode',s.mode);value('role',s.role);value('placement',s.packetPlacement);value('scope',s.contextScope);
     check('antirepeat',s.antiRepeat);check('structure_anti_repeat',s.structureAntiRepeat);
     for(const [id,key] of SCE_UI_SLIDERS){value(id,s[key]);const out=sceNode(id+'_out');if(out)out.textContent=s[key]+(id==='layers'?'':'%');}
     for(const [id,key] of [['feedback_window','feedbackWindow'],['ending_window','endingWatchWindow'],['ending_minimum','endingWatchMinimum']])value(id,s[key]);
@@ -1747,6 +1764,7 @@ function sceBindUI(){
     on('autonomy','change',e=>sceMutate(s=>{s.autonomyEnabled=e.target.checked;}));
     on('mode','change',e=>{sceMutate(s=>{s.mode=e.target.value;if(s.mode!=='automatic')s.autopilotEnabled=false;if(s.mode==='off')s.enabled=false;});sceCancelCurrent('Operating mode changed');sceSyncTool();});
     on('role','change',e=>sceMutate(s=>{s.role=e.target.value;}));
+    on('placement','change',e=>sceMutate(s=>{s.packetPlacement=SCE_PLACEMENTS.includes(e.target.value)?e.target.value:'auto';}));
     on('scope','change',e=>sceMutate(s=>{s.contextScope=e.target.value;}));
     on('antirepeat','change',e=>sceMutate(s=>{s.antiRepeat=e.target.checked;}));
     on('structure_anti_repeat','change',e=>sceMutate(s=>{s.structureAntiRepeat=e.target.checked;}));

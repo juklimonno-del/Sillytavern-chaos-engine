@@ -3,11 +3,13 @@ const assert=require('node:assert/strict');
 const {boot,prepare,attachReply,finish,complete,assistant:a,user:u}=require('./harness.cjs');
 
 test('automatic mode installs one combined depth-zero user prompt',async()=>{
-    const b=boot({autopilotEnabled:true},[u('Go.')]);await prepare(b);assert.equal(b.injections.length,1);
-    assert.equal(b.injections[0][2],1);assert.equal(b.injections[0][3],0);assert.equal(b.injections[0][5],1);
+    const b=boot({autopilotEnabled:true,autonomyEnabled:false},[u('Go.')]);await prepare(b);
+    const packets=b.injections.filter(x=>x[0]==='story_chaos_engine_auto');assert.equal(packets.length,1);
+    assert.equal(packets[0][2],1);assert.equal(packets[0][3],0);assert.equal(packets[0][5],1);
+    assert.equal(b.injections.find(x=>x[0]==='story_chaos_engine_ledger')[1],'','no ledger spec without autonomy');
     assert.equal(b.tools.length,0);
 });
-test('system-role override is preserved',async()=>{const b=boot({role:'system'});await prepare(b);assert.equal(b.injections[0][5],0);});
+test('system-role override is preserved',async()=>{const b=boot({role:'system'});await prepare(b);assert.equal(b.injections.filter(x=>x[0]==='story_chaos_engine_auto').at(-1)[5],0);});
 test('legacy tool calls retain recency without treating previews or tool output as completed replies',async()=>{
     const b=boot({mode:'tool',intensity:0,disruption:'off',structureEnabled:true,feedbackObserverEnabled:true,feedbackBalancerEnabled:true});
     const s=b.api.settings(b.context),key=b.api.key(b.context);
