@@ -1,8 +1,15 @@
-# Story Chaos Engine 1.9.2
+# Story Chaos Engine 1.9.3
 
-Browser-side creative guidance for SillyTavern. One ordinary model request, one per-turn packet near the end of the prompt (plus a fixed ledger format with the system prompt when autonomy is on), no additional inference service, analytics, or API key.
+Browser-side creative guidance for SillyTavern. One ordinary model request, one per-turn packet near the end of the prompt (plus a fixed label index, and a fixed ledger format when autonomy is on, both with the system prompt), no additional inference service, analytics, or API key.
 
-**Release:** 1.9.2 placement update and the 1.9.1 ledger fix for the 1.9.0 character autonomy update, on top of the 1.8.4 disruption update, the 1.8.3 packet-format and tone update, and the 1.8.0 Structural Entropy expansion, itself based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. The release pull request and its GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.x or 1.9.x test results.
+**Release:** 1.9.3 packet clarity update, the 1.9.2 placement update, and the 1.9.1 ledger fix for the 1.9.0 character autonomy update, on top of the 1.8.4 disruption update, the 1.8.3 packet-format and tone update, and the 1.8.0 Structural Entropy expansion, itself based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. The release pull request and its GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.x or 1.9.x test results.
+
+## What changed in 1.9.3
+
+The packet is easier to read without a system-prompt explanation.
+
+- **Label index.** A fixed `<scene_direction_index>` is injected with the system prompt. It defines each packet label once and contains no style guidance. It is identical every turn, so it is cached. You can remove any packet explanation from your own system prompt.
+- **Concrete structure phases.** Phase lines now name an act or event ("Let the two activities collide", "Have someone say something that lands badly") instead of describing an arrangement, and no longer cap scale with words like "small" or "subtle". Transitions describe how the reply moves between phases.
 
 ## What changed in 1.9.2
 
@@ -69,7 +76,7 @@ The everyday panel has an **Engine enabled** master switch, **Autopilot**, your 
 
 The normal updater follows the installed repository branch. Use `main` for published releases. Back up local modifications before updating.
 
-Use SillyTavern's Extension Manager to install or update from [juklimonno-del/Sillytavern-chaos-engine](https://github.com/juklimonno-del/Sillytavern-chaos-engine), reload SillyTavern, and confirm that both the installed manifest and panel show **1.9.2**.
+Use SillyTavern's Extension Manager to install or update from [juklimonno-del/Sillytavern-chaos-engine](https://github.com/juklimonno-del/Sillytavern-chaos-engine), reload SillyTavern, and confirm that both the installed manifest and panel show **1.9.3**.
 
 ### Optional manual update from the recorded 1.7.1 files
 
@@ -89,7 +96,7 @@ The script makes a timestamped backup beside the target directory, atomically re
 
 The deployable runtime files are `manifest.json`, `entry.js`, `index.js`, and `style.css`; retain `LICENSE`. A new manual installation can place those in one third-party extension folder. Do not enable two copies. For a manual update from the exact recorded v1.7.1 files, the applier preserves `.git` and unrelated files instead of replacing the whole directory. If it detects modified or newer files, reconcile those changes manually. Keep local changes backed up before using the host's updater again.
 
-Restart/reload SillyTavern and check that the panel says **v1.9.2**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
+Restart/reload SillyTavern and check that the panel says **v1.9.3**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
 
 ## Controls that mean what they say
 
@@ -143,7 +150,7 @@ Legacy function-tool mode is retained, uses fresh current-chat context, and expl
 
 The injected packet is bounded to 250 whitespace-separated words in the shipped cue vocabulary. It contains one architecture, a shared-budget selection of creative lenses, words in play, one contextual anchor at most, and an evidence-qualified correction when appropriate. A correction takes precedence over a separate closing suggestion. Pacing refines the chosen architecture rather than independently contradicting it.
 
-Keep your short main-prompt instruction to interpret the packet. The extension does not request verbose visible planning, alter the model's reasoning parameter, or call a second model.
+The extension injects a fixed label index with the system prompt, so the packet does not depend on your main prompt to explain it. The extension does not request verbose visible planning, alter the model's reasoning parameter, or call a second model.
 
 The repetition detector is intentionally conservative. Known character names are used for attribution; uncertain actors and weak action matches are diagnostic, not confident behavioral instructions. Explicit requests are scanned separately across the user turn and scoped to the requested actor. Negated/hypothetical mentions do not count as performed actions. Literal phrase repeats receive wording advice, not an invented semantic interpretation.
 
