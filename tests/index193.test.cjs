@@ -1,8 +1,10 @@
 'use strict';
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {boot,prepare,assistant:a,user:u,texted}=require('./harness.cjs');
+const {boot:bootRaw,prepare,assistant:a,user:u,texted}=require('./harness.cjs');
 
+const ON={autonomyEnabled:true,autonomyDefault194:true};
+const boot=(o={},...rest)=>bootRaw({...ON,...o},...rest);
 const INDEX='story_chaos_engine_index',SPEC='story_chaos_engine_ledger',PACKET='story_chaos_engine_auto';
 const last=(b,id)=>b.injections.filter(x=>x[0]===id).at(-1);
 const line=(name,o={})=>name+' | mood: '+(o.mood??'brittle 3')+' | feels: suspicion → Kade | want: '+(o.want??'the ledger before dawn')+
@@ -55,4 +57,15 @@ test('every label a packet can emit is defined in the index',async()=>{
     const b=boot({autopilotEnabled:true},[u('Go.')]);await prepare(b);const index=last(b,INDEX)[1];
     for(const head of ['Break','Form','Route','Phases','Attention','Transition','Lens','Close','State','Want','Stance','Desire','Stall','Drive','Ledger','Recurring close','Repeated closing wording'])assert.ok(heads.has(head),'fixture must exercise '+head);
     for(const head of heads)assert.match(index,new RegExp('^(?:[^:\\n]*[/] )?'+head.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?: \\(name\\)| /|:)','m'),'index must define '+head);
+});
+
+test('with autonomy off the index drops its State, Want, Drive and Ledger entries and stays fixed',async()=>{
+    const b=bootRaw({autopilotEnabled:true},[u('Go.')]);await prepare(b);
+    const plain=last(b,INDEX)[1];
+    assert.doesNotMatch(plain,/^(?:State|Want|Drive|Ledger)\b/m);
+    assert.match(plain,/^Form:/m);assert.match(plain,/^Close:/m);assert.match(plain,/<\/scene_direction_index>$/);
+    assert.equal(last(b,SPEC)[1],'','no ledger format either');
+    await prepare(b);assert.equal(last(b,INDEX)[1],plain,'identical every turn');
+    const on=boot({autopilotEnabled:true},[u('Go.')]);await prepare(on);
+    assert.match(last(on,INDEX)[1],/^Ledger:/m);
 });

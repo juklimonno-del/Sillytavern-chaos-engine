@@ -1,7 +1,7 @@
 // Story Chaos Engine v1.8.4. Browser-only; no extra model calls or telemetry.
 // Pure selection/analysis helpers are kept separate from the host lifecycle below.
 'use strict';
-const SCE_VERSION = '1.9.3';
+const SCE_VERSION = '1.9.4';
 const SCE_SETTINGS_KEY = 'storyChaosEngine';
 const SCE_PROMPT_ID = 'story_chaos_engine_auto';
 // Static ledger format, placed with the system prompt so it is read once and cached; only per-turn lines ride in the packet.
@@ -9,7 +9,7 @@ const SCE_LEDGER_PROMPT_ID = 'story_chaos_engine_ledger';
 const SCE_INDEX_PROMPT_ID = 'story_chaos_engine_index';
 // Fixed label reference for the packet. Identical every turn so it stays cacheable; definitions only.
 // Every label sceFormatCombined, sceFormatEndingWatch, sceAutonomyRoll and sceContinuePacket can emit must be listed.
-const SCE_PACKET_INDEX = ['<scene_direction_index>',
+const SCE_INDEX_LINES = ['<scene_direction_index>',
     '<scene_direction> is a per-reply instruction packet. It applies to the next reply only. Its contents are never narrated, quoted, or referenced. Only labels present in the current packet apply.',
     'Break: an event or change to introduce in this reply.',
     'Change: a shape adjustment for this reply’s prose.',
@@ -23,11 +23,16 @@ const SCE_PACKET_INDEX = ['<scene_direction_index>',
     'Context word: an existing element of the scene to bring forward.',
     'Close: the final beat of the reply.',
     'Repeated closing wording / Recurring close: a pattern in recent replies to avoid this time.',
+    // Autonomy entries: dropped from the index while autonomy is off (see sceIndexFor).
     'State (name): that character’s current tracked condition.',
     'Want / Stance / Desire / Stall (name): a correction to that character’s tracked state.',
     'Drive (name): a self-motivated push for that character this reply.',
     'Ledger: the tracker block to append, per the ledger format.',
-    '</scene_direction_index>'].join('\n');
+    '</scene_direction_index>'];
+const SCE_INDEX_AUTONOMY = /^(?:State|Want|Drive|Ledger)\b/u;
+const SCE_PACKET_INDEX = SCE_INDEX_LINES.join('\n');
+const SCE_PACKET_INDEX_PLAIN = SCE_INDEX_LINES.filter(x=>!SCE_INDEX_AUTONOMY.test(x)).join('\n');
+function sceIndexFor(s){return sceAutonomyOn(s)?SCE_PACKET_INDEX:SCE_PACKET_INDEX_PLAIN;}
 const SCE_PLACEMENTS = ['auto','last','before_user'];
 const SCE_FEATURES = ['structureEnabled', 'feedbackObserverEnabled', 'feedbackBalancerEnabled', 'endingWatchEnabled'];
 const SCE_PRESETS = Object.freeze({
@@ -495,8 +500,10 @@ function sceSettings(context=sceContext()) {
     if(!SCE_PLACEMENTS.includes(s.packetPlacement))s.packetPlacement='auto';
     for(const [key,value] of Object.entries({...SCE_ADV_DEFAULTS,...SCE_STRUCTURE_DEFAULTS,...SCE_FEEDBACK_DEFAULTS,...SCE_ENDING_WATCH_DEFAULTS}))
         if(s[key]===undefined)s[key]=value;
-    // Autonomy ships on, including for settings saved before 1.9.0.
-    if(typeof s.autonomyEnabled!=='boolean')s.autonomyEnabled=SCE_AUTONOMY_DEFAULTS.autonomyEnabled;
+    // Autonomy ships off from 1.9.4. Settings saved by 1.9.0–1.9.3 had it forced on, so turn it off once;
+    // after that the panel checkbox decides.
+    if(s.autonomyDefault194!==true){s.autonomyEnabled=SCE_AUTONOMY_DEFAULTS.autonomyEnabled;s.autonomyDefault194=true;}
+    else if(typeof s.autonomyEnabled!=='boolean')s.autonomyEnabled=SCE_AUTONOMY_DEFAULTS.autonomyEnabled;
     for(const key of [...SCE_FEATURES,'antiRepeat','structureAntiRepeat','autopilotEnabled'])
         if(typeof s[key]!=='boolean')s[key]=['antiRepeat','structureAntiRepeat'].includes(key);
     if(typeof s.notifyAfterReply!=='boolean')s.notifyAfterReply=true;
@@ -958,7 +965,7 @@ function sceShapeWatch(context=sceContext(),type='normal',closingWatchActive=fal
 // State is always derived from the surviving chat, never stored separately, so swipes, edits,
 // deletions and branches roll it back for free, and editing a tracker by hand edits the state.
 // The user's own persona is never tracked or driven.
-const SCE_AUTONOMY_DEFAULTS = {autonomyEnabled:true};
+const SCE_AUTONOMY_DEFAULTS = {autonomyEnabled:false};
 const SCE_AUTONOMY_WINDOW = 12;
 const SCE_AUTONOMY_MAX_ACTORS = 6;
 const SCE_AUTONOMY_FIELD_MAX = 160;
@@ -1118,8 +1125,9 @@ function sceContinuePacket(context=sceContext(),marker=''){
     return ['<scene_direction'+(marker?' id="'+marker+'"':'')+'>',...latest.slice(0,3).map(a=>sceStateLine(a,user)),
         sceTrackerInstruction(user,true),'</scene_direction>'].join('\n');
 }
-function sceAutonomyStripChat(chat,s){
-    if(!Array.isArray(chat)||!sceAutonomyOn(s))return 0;let n=0;
+// Runs whether or not autonomy is on: ledgers left in saved replies would otherwise teach the model to keep writing them.
+function sceAutonomyStripChat(chat){
+    if(!Array.isArray(chat))return 0;let n=0;
     for(let i=0;i<chat.length;i++){
         const m=chat[i];if(!m||m.is_user!==false||typeof m.mes!=='string'||!/sce_tracker|<\/?sce(?:_[a-z]*)?\s*$/iu.test(m.mes))continue;
         // Current hosts already pass per-request copies; replacing the slot keeps older hosts' saved messages safe too.
@@ -1429,7 +1437,7 @@ function sceClearPrompt(context=sceContext()) {context?.setExtensionPrompt?.(SCE
 function sceGoogleSource(context){return context?.mainApi==='openai'&&['makersuite','vertexai'].includes(context?.chatCompletionSettings?.chat_completion_source);}
 function scePacketDepth(context,s){const p=s?.packetPlacement;return p==='before_user'?1:p==='last'?0:sceGoogleSource(context)?1:0;}
 // The index precedes the ledger format: SillyTavern joins in-prompt extension prompts in sorted key order.
-function sceSetIndex(context,prompt){context.setExtensionPrompt(SCE_INDEX_PROMPT_ID,prompt?SCE_PACKET_INDEX:'',0,0,false,0);}
+function sceSetIndex(context,prompt,s){context.setExtensionPrompt(SCE_INDEX_PROMPT_ID,prompt?sceIndexFor(s):'',0,0,false,0);}
 function sceSetLedgerSpec(context,s){context.setExtensionPrompt(SCE_LEDGER_PROMPT_ID,sceAutonomyOn(s)?sceLedgerSpec(sceUserName(context)):'',0,0,false,0);}
 function sceSafeClear(context=sceContext()){try{sceClearPrompt(context);}catch(error){console.warn('[Story Chaos Engine] Unable to clear the host prompt.',error);}}
 function sceRunReceipt(context=sceContext()){return SCE_RUN_RECEIPTS.get(getChatKey(context))||null;}
@@ -1648,13 +1656,13 @@ globalThis.storyChaosEngineInterceptor=async function(chat,_contextSize,_abort,t
         if(kind==='continue'&&sceRuntimeEnabled&&settings.enabled&&settings.mode==='automatic'&&sceAutonomyOn(settings)){
             const prompt=sceContinuePacket(context,'SCE-'+(++sceRunCounter)+'-'+randomInt(1000000));
             sceAutonomyStripChat(chat,settings);
-            sceSetIndex(context,prompt);sceSetLedgerSpec(context,settings);
+            sceSetIndex(context,prompt,settings);sceSetLedgerSpec(context,settings);
             // Continue stays last: the reply being continued must remain the final turn.
             context.setExtensionPrompt(SCE_PROMPT_ID,prompt,1,0,false,settings.role==='system'?0:1);
             return;
         }
         if(!sceRuntimeEnabled||!settings.enabled||settings.mode!=='automatic'||!['normal','regenerate','swipe'].includes(kind)){
-            sceSafeClear(context);return;
+            sceSafeClear(context);if(sceRuntimeEnabled)sceAutonomyStripChat(chat);return;
         }
         if(sceActiveRun){sceReleaseRunSignal(sceActiveRun);if(!['completed','failed','stopped','invalidated'].includes(sceActiveRun.state))
             sceMarkUnsuccessful(sceActiveRun,'unverified','Replaced by another request');}
@@ -1667,7 +1675,7 @@ globalThis.storyChaosEngineInterceptor=async function(chat,_contextSize,_abort,t
         // Old ledgers leave the outgoing history; the newest state rides in the packet instead.
         sceAutonomyStripChat(chat,packet.settings);
         // Preparation is synchronous. One atomic replacement, or a clear in the failure handler.
-        sceSetIndex(context,packet.prompt);sceSetLedgerSpec(context,packet.settings);
+        sceSetIndex(context,packet.prompt,packet.settings);sceSetLedgerSpec(context,packet.settings);
         context.setExtensionPrompt(SCE_PROMPT_ID,packet.prompt,1,scePacketDepth(context,packet.settings),false,settings.role==='system'?0:1);
         const run={id,key:getChatKey(context),type:kind,started,targetIndex,state:'prepared',prompt:packet.prompt,packet:{creative:packet.creative,structure:packet.structure,autonomy:packet.autonomy},
             settings:packet.settings,layers:packet.creative.layers.length,family:packet.structure?.family||null,

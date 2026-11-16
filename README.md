@@ -1,8 +1,13 @@
-# Story Chaos Engine 1.9.3
+# Story Chaos Engine 1.9.4
 
 Browser-side creative guidance for SillyTavern. One ordinary model request, one per-turn packet near the end of the prompt (plus a fixed label index, and a fixed ledger format when autonomy is on, both with the system prompt), no additional inference service, analytics, or API key.
 
-**Release:** 1.9.3 packet clarity update, the 1.9.2 placement update, and the 1.9.1 ledger fix for the 1.9.0 character autonomy update, on top of the 1.8.4 disruption update, the 1.8.3 packet-format and tone update, and the 1.8.0 Structural Entropy expansion, itself based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. The release pull request and its GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.x or 1.9.x test results.
+**Release:** 1.9.4 autonomy opt-in, the 1.9.3 packet clarity update, the 1.9.2 placement update, and the 1.9.1 ledger fix for the 1.9.0 character autonomy update, on top of the 1.8.4 disruption update, the 1.8.3 packet-format and tone update, and the 1.8.0 Structural Entropy expansion, itself based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. The release pull request and its GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.x or 1.9.x test results.
+
+## What changed in 1.9.4
+
+- **Character autonomy is off by default**, including for installations that had it on from 1.9.0–1.9.3 (turned off once on update). Tick **Character autonomy** in the panel to use it again; that choice is kept.
+- **Off is fully off.** No ledger format, no State or Drive lines, no autonomy entries in the label index, and any `[sce_tracker]` blocks already in earlier replies are left out of what is sent to the model, so it stops copying them. Your saved messages are not changed; old trackers stay visible in them until you edit them out.
 
 ## What changed in 1.9.3
 
@@ -42,7 +47,7 @@ Characters now carry their own state and act on it. The engine still makes one o
 - **Drives.** On 30%, 45%, 60%, 75% or 90% of packets (by Disruption level), one character (sometimes two in groups) gets a `Drive:` line: initiative, want-versus-desire conflict, concealment of a private thought, mood against the scene, an off-screen agenda surfacing, or resisting when the user’s move cuts against their want. Max adds a desire that cracks or proves to be cover. Drives are written about the character’s goals, never about accommodating the user.
 - **Continue mode.** Continue gets a short packet with only the current `State` lines and a request to end the reply with a fresh tracker; no lenses, breaks or drives. The old tracker is removed from the text being continued, and SillyTavern saves the continuation on top of that text, so the finished reply carries exactly one ledger. If you stop a continuation partway, the reply has no ledger and state falls back to the previous reply's.
 - **Own budget.** Ledger lines sit outside the 250-word packet budget, so they never crowd out lenses.
-- **Character autonomy** checkbox in the panel, on by default and applied to existing installations. The tracker stays visible in replies in this release so you can watch it work.
+- **Character autonomy** checkbox in the panel, on by default and applied to existing installations (off by default from 1.9.4). The tracker stays visible in replies in this release so you can watch it work.
 
 ## What changed in 1.8.4
 
@@ -76,7 +81,7 @@ The everyday panel has an **Engine enabled** master switch, **Autopilot**, your 
 
 The normal updater follows the installed repository branch. Use `main` for published releases. Back up local modifications before updating.
 
-Use SillyTavern's Extension Manager to install or update from [juklimonno-del/Sillytavern-chaos-engine](https://github.com/juklimonno-del/Sillytavern-chaos-engine), reload SillyTavern, and confirm that both the installed manifest and panel show **1.9.3**.
+Use SillyTavern's Extension Manager to install or update from [juklimonno-del/Sillytavern-chaos-engine](https://github.com/juklimonno-del/Sillytavern-chaos-engine), reload SillyTavern, and confirm that both the installed manifest and panel show **1.9.4**.
 
 ### Optional manual update from the recorded 1.7.1 files
 
@@ -96,7 +101,7 @@ The script makes a timestamped backup beside the target directory, atomically re
 
 The deployable runtime files are `manifest.json`, `entry.js`, `index.js`, and `style.css`; retain `LICENSE`. A new manual installation can place those in one third-party extension folder. Do not enable two copies. For a manual update from the exact recorded v1.7.1 files, the applier preserves `.git` and unrelated files instead of replacing the whole directory. If it detects modified or newer files, reconcile those changes manually. Keep local changes backed up before using the host's updater again.
 
-Restart/reload SillyTavern and check that the panel says **v1.9.3**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
+Restart/reload SillyTavern and check that the panel says **v1.9.4**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
 
 ## Controls that mean what they say
 

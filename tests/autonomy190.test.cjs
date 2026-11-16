@@ -1,7 +1,9 @@
 'use strict';
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {boot,prepare,attachReply,finish,assistant:a,user:u}=require('./harness.cjs');
+const {boot:bootRaw,prepare,attachReply,finish,assistant:a,user:u}=require('./harness.cjs');
+// Autonomy ships off from 1.9.4; these tests exercise it switched on, as a 1.9.4 install with the box ticked.
+const boot=(o={},...rest)=>bootRaw({autonomyEnabled:true,autonomyDefault194:true,...o},...rest);
 
 const line=(name,o={})=>name+' | mood: '+(o.mood??'brittle 3')+' | feels: suspicion → Kade | want: '+(o.want??'the ledger before dawn')+
     ' | desire: '+(o.desire??'leave owing nothing')+' | toward User: '+(o.toward??'wary -1')+' | thinks: '+(o.thinks??'He knows.');
@@ -10,9 +12,12 @@ const chatOf=(...replies)=>replies.flatMap((r,i)=>i?[u('I wait.'),r]:[r]);
 const quiet={disruption:'off',autonomyEnabled:true};
 const lines=p=>p.autonomy?.lines||[];
 
-test('autonomy ships on, including for settings saved before 1.9.0, and can be switched off',()=>{
-    const b=boot({},[]);assert.equal(b.api.settings(b.context).autonomyEnabled,true);
-    const old=boot({schemaVersion:171,disruption:'max'},[]);assert.equal(old.api.settings(old.context).autonomyEnabled,true);
+test('autonomy ships off, is turned off once for 1.9.0–1.9.3 settings, and the checkbox decides after that',()=>{
+    assert.equal(bootRaw({},[]).api.settings(bootRaw({},[]).context).autonomyEnabled,false);
+    const legacy=bootRaw({autonomyEnabled:true,disruption:'max'},[]),s=legacy.api.settings(legacy.context);
+    assert.equal(s.autonomyEnabled,false,'1.9.3 forced it on, so 1.9.4 turns it off once');assert.equal(s.autonomyDefault194,true);
+    s.autonomyEnabled=true;assert.equal(legacy.api.settings(legacy.context).autonomyEnabled,true,'re-enabling sticks');
+    const old=bootRaw({schemaVersion:171,disruption:'max'},[]);assert.equal(old.api.settings(old.context).autonomyEnabled,false);
     const off=boot({autonomyEnabled:false},[tracked('Nora waited.',line('Nora'))]);
     const p=off.api.packet(off.context,true);
     assert.equal(p.autonomy,null);assert.doesNotMatch(p.prompt,/sce_tracker|State|Drive \(/);
@@ -131,7 +136,9 @@ test('trackers are stripped from the outgoing history without touching saved mes
     const off=boot({autonomyEnabled:false},chat),kept=[...off.context.chat];
     off.events.emit('GENERATION_STARTED','normal',{},false);
     await off.scope.storyChaosEngineInterceptor(kept,8192,()=>{},'normal');
-    assert.match(kept[0].mes,/sce_tracker/,'autonomy off leaves history alone');
+    for(const m of kept)assert.doesNotMatch(m.mes,/sce_tracker|mood:/,'old ledgers leave the history with autonomy off too');
+    assert.deepEqual(off.context.chat.map(m=>m.mes),saved,'saved chat is still unchanged');
+    assert.doesNotMatch(off.injections.filter(x=>x[0]==='story_chaos_engine_auto').at(-1)[1],/State|Ledger|sce_tracker/);
 });
 
 test('a ledger in the reply does not disturb completion receipts or story analysis',async()=>{
@@ -159,13 +166,13 @@ test('continue mode drops the old ledger from the continued reply and asks for a
     assert.match(b.api.packet(b.context,true).prompt,/want: the far bank/);
 });
 
-test('continue without a ledger yet still asks for one; continue with autonomy off injects nothing and strips nothing',async()=>{
+test('continue without a ledger yet still asks for one; continue with autonomy off injects nothing but still strips old ledgers',async()=>{
     let b=boot({},[a('Nora reached for the')]);
     await b.scope.storyChaosEngineInterceptor([...b.context.chat],8192,()=>{},'continue');
     assert.match(b.injections.at(-1)[1],/^<scene_direction id="[^"]+">\nLedger: continue the reply/);
     b=boot({autonomyEnabled:false},[tracked('Nora reached for the',line('Nora'))]);const out=[...b.context.chat];
     await b.scope.storyChaosEngineInterceptor(out,8192,()=>{},'continue');
-    assert.equal(b.injections.at(-1)[1],'');assert.match(out[0].mes,/sce_tracker/);
+    assert.equal(b.injections.at(-1)[1],'');assert.equal(out[0].mes,'Nora reached for the');
     b=boot({enabled:false},[tracked('Nora reached for the',line('Nora'))]);
     await b.scope.storyChaosEngineInterceptor([...b.context.chat],8192,()=>{},'continue');
     assert.equal(b.injections.at(-1)?.[1]??'','');

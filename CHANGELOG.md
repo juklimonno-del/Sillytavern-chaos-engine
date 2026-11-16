@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.4 — November 16, 2026
+
+Character autonomy becomes opt-in, and off means fully off.
+
+- Autonomy ships off. Settings saved by 1.9.0–1.9.3 had it forced on, so 1.9.4 turns it off once (`autonomyDefault194`); after that the panel checkbox decides and re-enabling sticks.
+- Old `[sce_tracker]` / `<sce_tracker>` blocks are removed from the outgoing history whenever the extension is loaded, with autonomy on or off and for every request type, so ledgers left in earlier replies no longer teach the model to keep writing them. Saved messages are not edited.
+- With autonomy off, the label index leaves out its State, Want / Stance / Desire / Stall, Drive and Ledger entries, and no ledger format is sent. The index is still identical every turn.
+
 ## 1.9.3 — November 16, 2026
 
 Packet clarity update. No change to receipts, learning, placement or saved chat data.
