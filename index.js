@@ -1,7 +1,7 @@
 // Story Chaos Engine v1.8.4. Browser-only; no extra model calls or telemetry.
 // Pure selection/analysis helpers are kept separate from the host lifecycle below.
 'use strict';
-const SCE_VERSION = '1.9.7';
+const SCE_VERSION = '1.9.8';
 const SCE_SETTINGS_KEY = 'storyChaosEngine';
 const SCE_PROMPT_ID = 'story_chaos_engine_auto';
 // Static ledger format, placed with the system prompt so it is read once and cached; only per-turn lines ride in the packet.
@@ -433,6 +433,12 @@ function sceDmClean(st){
     st.cadence=(Array.isArray(st.cadence)?st.cadence:[]).filter(Number.isSafeInteger).slice(-10);
     st.events=(Array.isArray(st.events)?st.events:[]).filter(e=>sceObject(e)&&Number.isSafeInteger(e.pos)&&Object.hasOwn(SCE_DM_HEAT,e.kind))
         .map(e=>({pos:e.pos,kind:e.kind,delta:SCE_DM_HEAT[e.kind]})).slice(-20);
+    st.shapes=(Array.isArray(st.shapes)?st.shapes:[]).filter(e=>sceObject(e)&&Number.isSafeInteger(e.pos)&&Object.hasOwn(SCE_SHAPE_DIMENSION,e.trait)
+        &&['string','number'].includes(typeof e.from)).map(e=>({pos:e.pos,trait:e.trait,from:e.from,done:e.done===true})).slice(-12);
+    const stats=sceObject(st.shapeStats)?st.shapeStats:{};
+    st.shapeStats=Object.fromEntries(Object.keys(SCE_SHAPE_DIMENSION).filter(k=>sceObject(stats[k])).map(k=>{
+        const sent=Math.max(0,Math.min(1e6,Math.floor(Number(stats[k].sent)||0)));
+        return [k,{sent,followed:Math.max(0,Math.min(sent,Math.floor(Number(stats[k].followed)||0)))}];}));
     return st;
 }
 function sceChatOn(context){const st=context?.chatMetadata?.[SCE_DM_META];return sceObject(st)&&st.enabled===true;}
@@ -1059,26 +1065,70 @@ function sceEndingWatch(context=sceContext(),type='normal'){
 
 // Pattern-break detection (1.8.4). Looks at how recent replies open, end and split between speech and narration,
 // and names a different shape when the same one keeps repeating. Content is never inspected for events.
-function sceShapeWatch(context=sceContext(),type='normal',closingWatchActive=false){
+// Reply skeletons (1.9.8). The watch compares the shape of the last four replies on several dimensions and,
+// when one repeats, names one concrete change. Each change records the value it is breaking, so the next
+// reply can be checked and the per-chat follow rate can steer which changes are asked for.
+const SCE_LENGTH_BUCKETS = [80,180,320,500];
+function sceSpeechShare(x){let n=0;for(const m of x.matchAll(/"([^"\n]+)"|“([^”\n]+)”/gu))n+=(m[1]||m[2]||'').length;return n/Math.max(1,x.length);}
+function sceSkeleton(text){
+    const t=String(text||'').trim();
+    const paras=(/\n\s*\n/u.test(t)?t.split(/\n\s*\n/u):t.split(/\n/u)).map(x=>x.trim()).filter(Boolean);
+    const words=(t.match(/[\p{L}\p{N}’']+/gu)||[]).length,share=sceSpeechShare(t);
+    const opener=/^["“]/u.test(t)?'<speech>':(t.match(/[\p{L}\p{N}]+/u)||[''])[0].toLowerCase();
+    const close=/\?\s*["”]?\s*[*_]*$/u.test(t)?'question':/["”]\s*[*_]*$/u.test(t)?'speech':'action';
+    return {paragraphs:paras.length,length:SCE_LENGTH_BUCKETS.filter(x=>words>=x).length,words,opener,close,share,
+        speech:share<.2?'low':share>.6?'high':'mid',
+        sequence:paras.map(x=>/^["“]/u.test(x)||sceSpeechShare(x)>=.35?'D':'N').join('')};
+}
+// Which skeleton value a trait is breaking.
+const SCE_SHAPE_DIMENSION = {paragraphs:'paragraphs',length:'length',sequence:'sequence',opening:'opener',ending:'close',question:'close',speech:'speech',narration:'speech'};
+function sceShapeFollowRate(stats,trait){const t=stats?.[trait];return ((t?.followed||0)+1)/((t?.sent||0)+2);}
+function sceShapeWatch(context=sceContext(),type='normal',closingWatchActive=false,stats=null){
     const s=context?._sceSettings||sceSettings(context),level=sceDisruptionLevel(s);
     if(level==='off')return null;
     const samples=sceFeedbackReplyEntries(context,4,type);if(samples.length<4)return null;
     const need=level==='low'||level==='medium'?4:3;
-    const clean=samples.map(x=>sceRecord(x.message,s).clean.trim());
-    const count=(fn,value)=>clean.filter(x=>fn(x)===value).length;
-    const opener=x=>/^["“]/u.test(x)?'<speech>':(x.match(/[\p{L}\p{N}]+/u)||[''])[0].toLowerCase();
-    const endsSpoken=x=>/["”]\s*[*_]*$/u.test(x);
-    const share=x=>{let n=0;for(const m of x.matchAll(/"([^"\n]+)"|“([^”\n]+)”/gu))n+=(m[1]||m[2]||'').length;return n/Math.max(1,x.length);};
-    const found=[];
-    const first=opener(clean.at(-1));
-    if(first&&count(opener,first)>=need)found.push({trait:'opening',text:first==='<speech>'
+    const sk=samples.map(x=>sceSkeleton(sceRecord(x.message,s).clean)),latest=sk.at(-1);
+    const repeats=(key,value=latest[key])=>sk.filter(x=>x[key]===value).length>=need;
+    const found=[],add=(trait,text)=>found.push({trait,text,from:latest[SCE_SHAPE_DIMENSION[trait]]});
+    if(latest.opener&&repeats('opener'))add('opening',latest.opener==='<speech>'
         ?'Open on action or a sensory detail instead of a spoken line.'
-        :'Open with a different kind of first sentence: a spoken line, a sound, or motion already under way.'});
-    if(count(endsSpoken,true)>=need&&!closingWatchActive)found.push({trait:'ending',text:'End on action or a physical detail, not on spoken words.'});
-    if(count(endsSpoken,false)>=4&&!closingWatchActive)found.push({trait:'ending',text:'End on a spoken line.'});
-    if(clean.every(x=>share(x)<.2))found.push({trait:'speech',text:'Give dialogue the lead in this reply.'});
-    if(clean.every(x=>share(x)>.6))found.push({trait:'narration',text:'Let action and description carry this reply, with little speech.'});
-    return found.length?pick(found):null;
+        :'Open with a different kind of first sentence: a spoken line, a sound, or motion already under way.');
+    if(!closingWatchActive){
+        if(latest.close==='question'&&repeats('close'))add('question','End without a question.');
+        else if(sk.filter(x=>x.close!=='action').length>=need&&latest.close!=='action')add('ending','End on action or a physical detail, not on spoken words.');
+        else if(sk.every(x=>x.close==='action'))add('ending','End on a spoken line.');
+    }
+    if(sk.every(x=>x.speech==='low'))add('speech','Give dialogue the lead in this reply.');
+    if(sk.every(x=>x.speech==='high'))add('narration','Let action and description carry this reply, with little speech.');
+    if(repeats('paragraphs')){
+        const n=latest.paragraphs,target=n>=4?2:n===3?pick([1,5]):n===2?4:3;
+        add('paragraphs','Write this reply in '+target+' paragraph'+(target>1?'s':'')+'.');
+    }
+    if(repeats('length')){
+        const mean=sk.reduce((t,x)=>t+x.words,0)/sk.length;
+        add('length',latest.length>=2?'Keep this reply under '+Math.max(40,Math.round(mean*.5/10)*10)+' words.'
+            :'Let this reply run to about '+Math.max(150,Math.round(mean*2/10)*10)+' words.');
+    }
+    if(latest.paragraphs>=3&&repeats('sequence'))add('sequence',/^(?:ND)+N?$|^(?:DN)+D?$/u.test(latest.sequence)
+        ?'Keep the dialogue together in one stretch instead of alternating it with narration.'
+        :'Spread the dialogue through the reply instead of keeping it in one block.');
+    if(!found.length)return null;
+    return sceWeighted(found.map(value=>({value,weight:sceShapeFollowRate(stats,value.trait)})));
+}
+// Check replies written under a shape change and keep a per-trait follow rate in the chat state.
+function sceShapeEvaluate(state,entries,s,position){
+    const replies=entries.filter(x=>x.message&&!x.message.is_user&&!x.message.is_system);
+    state.shapes=state.shapes.filter(x=>x.pos<position);
+    for(const entry of state.shapes){
+        if(entry.done||!replies[entry.pos])continue;
+        const value=sceSkeleton(sceRecord(replies[entry.pos].message,s).clean)[SCE_SHAPE_DIMENSION[entry.trait]];
+        const t=state.shapeStats[entry.trait]||(state.shapeStats[entry.trait]={sent:0,followed:0});
+        t.sent++;if(value!==entry.from)t.followed++;entry.done=true;
+    }
+}
+function sceShapeCommit(state,position,shape){
+    if(shape)state.shapes=[...state.shapes,{pos:position,trait:shape.trait,from:shape.from,done:false}].slice(-12);
 }
 // Character autonomy (1.9.0). The model writes a compact [sce_tracker] ledger after each reply (the <sce_tracker> form is still read).
 // State is always derived from the surviving chat, never stored separately, so swipes, edits,
@@ -1535,7 +1585,7 @@ function sceCadenceCommit(state,position,fired){
 // One directive per firing turn: a Break, a Form (with its own phases and close), a single Lens, or a correction.
 // The DM's own event is the most common directive; forms, lenses and corrections share the rest.
 function sceSingleDirective(creative,structure,warning,shape){
-    const options=[creative.disruption&&{value:'break',weight:3},structure&&{value:'form',weight:1.5},
+    const options=[creative.disruption&&{value:'break',weight:3},structure&&{value:'form',weight:.5},
         creative.layers.length&&{value:'lens',weight:1.5},(warning||shape)&&{value:'fix',weight:1}].filter(Boolean);
     const choice=options.length?sceWeighted(options):null;
     creative.word_sparks=[];creative.anchor=null;
@@ -1552,26 +1602,31 @@ function sceBuildPacket(context=sceContext(),preview=false,type='normal',marker=
     const structure=sceStructuralRoll(snapshot,true,type),creative=sceLayeredRoll(snapshot,true,structure);
     const warning=sceEndingWatch(snapshot,type);
     // Soft caps are applied to choices, never by truncating continuity or agency instructions.
-    const shape=sceShapeWatch(snapshot,type,!!warning);
+    const dmState=sceDmState(context),shape=sceShapeWatch(snapshot,type,!!warning,dmState.shapeStats);
     // Autonomy lines carry their own budget so the ledger never squeezes out the creative lenses.
     const autonomy=sceAutonomyRoll(snapshot,type),allowance=250+(autonomy?.words||0);
     // The panel preview always shows a firing turn so there is something to inspect. Tool mode is the model asking, so no cadence there.
     // The cadence decision is recorded when a real request is prepared; a failed or stopped reply is re-decided by its swipe.
     const key=getChatKey(context),position=sceCadencePosition(snapshot._sceEntries),cadenced=s.mode==='automatic'&&(SCE_CADENCES[s.cadence]||4)>1;
-    const dmState=sceDmState(context),fires=(preview&&!live)||sceCadenceFires(dmState,s,position);
+    const fires=(preview&&!live)||sceCadenceFires(dmState,s,position);
     let kept={structure,warning,shape},directive=null;
     if(cadenced){
         // The DM replaces the escalating Break pool; heat is read at this reply's position, so swipes re-read it.
         const recentEvents=(sceRecentCueHistory.get(key)||[]).filter(x=>x.startsWith('disruption:')).map(x=>x.slice(11));
         creative.disruption=fires?sceDmRoll(s,dmState,position,recentEvents):null;
-        if(fires){kept=sceSingleDirective(creative,structure,warning,shape);directive=kept.choice;}
-        else{creative.disruption=null;creative.layers=[];creative.word_sparks=[];creative.anchor=null;kept={structure:null,warning:null,shape:null};}
+        // Corrections answer what the model actually wrote, so they run on their own trigger, quiet turns included,
+        // and never count as the turn's directive. One correction line at most; when a recurring close and a shape change
+        // both apply they take turns at random, so a sticky closing phrase cannot starve every other change.
+        if(fires){kept=sceSingleDirective(creative,structure,null,null);directive=kept.choice;}
+        else{creative.disruption=null;creative.layers=[];creative.word_sparks=[];creative.anchor=null;kept={structure:null};}
+        kept.warning=warning&&(!shape||randomInt(2)===0)?warning:null;kept.shape=kept.warning?null:shape;
     }
     let prompt=sceFormatCombined(creative,kept.structure,kept.warning,marker,kept.shape,autonomy);
     while(prompt.split(/\s+/u).length>allowance&&creative.layers.length>1){creative.layers.pop();prompt=sceFormatCombined(creative,kept.structure,kept.warning,marker,kept.shape,autonomy);}
     const packet={prompt,creative,structure:kept.structure,warning:kept.warning,shape:kept.shape,autonomy,settings:s,snapshot,
         quiet:cadenced&&!fires,directive,words:prompt?prompt.trim().split(/\s+/u).length:0};
-    if(cadenced&&(live||!preview)){sceCadenceCommit(dmState,position,fires&&!!directive);sceDmCommit(dmState,position,directive==='break'?creative.disruption:null);sceDmSave(context);}
+    if(cadenced&&(live||!preview)){sceCadenceCommit(dmState,position,fires&&!!directive);sceDmCommit(dmState,position,directive==='break'?creative.disruption:null);}
+    if(live||!preview){sceShapeEvaluate(dmState,snapshot._sceEntries,s,position);sceShapeCommit(dmState,position,packet.shape);sceDmSave(context);}
     if(!preview)sceCommitPacketHistory(context,packet);
     return packet;
 }
@@ -1599,7 +1654,8 @@ function sceDmStatus(context){
     const engine=!sceRuntimeEnabled||!s.enabled||s.mode==='off'?' (the engine itself is switched off)':s.mode==='tool'?' (tool mode: the model asks for guidance)':'';
     if(!st.enabled)return 'Story DM is off for this chat'+engine+'. Use /dm on to start it.';
     return 'Story DM is on for this chat'+engine+' · heat '+heat.toFixed(1)+(heat>=1.75?' (hot: releasing)':heat>=1?' (warm)':' (cool)')+
-        ' · '+(last===null?'no directive yet':'last directive '+(position-last)+' repl'+(position-last===1?'y':'ies')+' ago')+'.';
+        ' · '+(last===null?'no directive yet':'last directive '+(position-last)+' repl'+(position-last===1?'y':'ies')+' ago')+
+        (()=>{const t=Object.values(st.shapeStats);const sent=t.reduce((n,x)=>n+x.sent,0);return sent?' · shape changes followed '+t.reduce((n,x)=>n+x.followed,0)+'/'+sent:'';})()+'.';
 }
 function sceDmCommand(value){
     const context=sceContext(),arg=String(value??'').trim().toLowerCase()||'status';

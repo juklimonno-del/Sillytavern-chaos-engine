@@ -5,8 +5,11 @@ const {boot,prepare,assistant:a,user:u,texted}=require('./harness.cjs');
 
 // The harness pins cadence to 'every' for the older suites; these tests use the shipped default.
 const shipped=(o={},...rest)=>boot({cadence:undefined,...o},...rest);
-const DIRECTIVE=/^(?:Break|Event \(|Payoff|Linger|Form|Lens \(|Recurring close|Repeated closing wording|Change):?/;
+// DM directives obey cadence; corrections (1.9.8) answer what the model wrote and run on their own trigger.
+const DIRECTIVE=/^(?:Break|Event \(|Payoff|Linger|Form|Lens \():?/;
+const CORRECTION=/^(?:Recurring close|Repeated closing wording|Change):?/;
 const directives=p=>p.split('\n').filter(x=>DIRECTIVE.test(x));
+const corrections=p=>p.split('\n').filter(x=>CORRECTION.test(x));
 // Simulate a chat: each step appends a user turn and an assistant reply, then rolls the next packet for real.
 function run(opts,steps,seed){
     const b=shipped(opts,[...texted()],seed),out=[];
@@ -49,7 +52,7 @@ test('a firing turn carries exactly one directive, with no word sparks or contex
     for(const opts of [{autopilotEnabled:true,disruption:'max',intensity:100,maxLayers:5},{disruption:'high'},{autopilotEnabled:true,disruption:'off'}]){
         const {out}=run(opts,120,4);
         for(const p of out.filter(p=>!p.quiet)){
-            const d=directives(p.prompt);assert.equal(d.length,1,p.prompt);seen.add(p.directive);
+            const d=directives(p.prompt);assert.equal(d.length,1,p.prompt);assert.ok(corrections(p.prompt).length<=1,p.prompt);seen.add(p.directive);
             assert.doesNotMatch(p.prompt,/^(?:Words in play|Context word):/m,p.prompt);
             if(p.directive==='form')assert.match(p.prompt,/^Phases: .+\n(?:Attention: .+\n)?Transition: .+\n(?:Close: .+\n)?<\/scene_direction>$/m);
             else assert.doesNotMatch(p.prompt,/^(?:Phases|Transition|Close):/m);
@@ -58,13 +61,15 @@ test('a firing turn carries exactly one directive, with no word sparks or contex
     for(const kind of ['break','form','lens'])assert.ok(seen.has(kind),'never picked '+kind);
 });
 
-test('a quiet turn sends nothing: no packet and no index',async()=>{
+test('a quiet turn carries no DM directive, at most one correction, and an empty quiet turn sends no index',async()=>{
     const b=shipped({autopilotEnabled:true},[...texted()],5);let quiet=0,loud=0;
     for(let i=0;i<24;i++){
         b.context.chat.push(u('I wait.'));const r=await prepare(b);
         const packet=b.injections.filter(x=>x[0]==='story_chaos_engine_auto').at(-1)[1];
         const index=b.injections.filter(x=>x[0]==='story_chaos_engine_index').at(-1)[1];
-        if(packet===''){quiet++;assert.equal(index,'');assert.equal(r.prompt,'');}else{loud++;assert.match(index,/^<scene_direction_index>/);}
+        if(packet===''){assert.equal(index,'');assert.equal(r.prompt,'');}else assert.match(index,/^<scene_direction_index>/);
+        assert.ok(corrections(packet).length<=1,packet);
+        if(directives(packet).length)loud++;else quiet++;
         b.context.chat.push(a('Bonnie answered and went back to her phone.'));
     }
     assert.ok(quiet>loud&&loud>0,quiet+' quiet / '+loud+' firing');

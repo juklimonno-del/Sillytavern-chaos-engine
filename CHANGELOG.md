@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.9.8 — November 16, 2026
+
+Structure repetition is answered from what the model actually wrote.
+
+- **Reply skeletons.** The shape watch reads each of the last four replies for paragraph count, length (five buckets), the dialogue/narration order of its paragraphs, opening, close (question, spoken line or action) and speech share. When a value repeats (3 of 4 at High and Max, 4 of 4 at Low and Medium) it sends one concrete change: "Write this reply in 2 paragraphs.", "Keep this reply under 100 words.", "End without a question.", "Keep the dialogue together in one stretch instead of alternating it with narration.", alongside the earlier opening, ending and speech-share changes. A change never asks for the value it is breaking.
+- **Checked and learned per chat.** Each change records the value it is breaking. When the next reply arrives it counts as followed if that value changed. Per-trait follow rates are kept in the chat state and weight which change is asked for. `/dm status` reports how many changes were followed.
+- **Own trigger.** Under cadence, corrections (shape changes and the closing-wording watch) no longer compete with DM directives. They ride any reply that needs one, quiet turns included, one line at most. When both a closing-wording warning and a shape change apply, they take turns at random so neither starves the other.
+- **Forms demoted.** On a firing turn a Form now has weight 0.5 (event 3, lens 1.5), down from 1.5.
+- Add `tests/shape198.test.cjs`.
+
 ## 1.9.7 — November 16, 2026
 
 The DM is switched on per chat, and its state is saved in the chat.
