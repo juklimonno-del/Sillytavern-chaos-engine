@@ -123,11 +123,13 @@ test('closings carry momentum instead of staying with the current activity',()=>
 });
 
 const SAME=[1,2,3,4].flatMap(i=>[a('Marek stepped closer and said nothing. The lamp swung. He waited for the man to speak.'),u('I wait '+i)]);
+// Varied on every dimension the watch reads: opening, close, speech share, paragraph count and length.
+const LONG=' The room held its breath while the rain kept on against the glass and the lamp moved in slow circles over the table.';
 const MIXED=[
     a('Marek stepped closer and said nothing.'),u('1'),
-    a('"You counted," the man whispered. "Why would you count?" He looked at the floor.'),u('2'),
-    a('Rain hit the window. "Ten," Marek said, "and then nothing at all, you understand?"'),u('3'),
-    a('The lamp swung. Nobody moved for a long while.')
+    a('"You counted," the man whispered. "Why would you count?" He looked at the floor.'+LONG.repeat(4)+'\n\nMarek did not answer.'),u('2'),
+    a('Rain hit the window.'+LONG.repeat(2)+'\n\n"Ten," Marek said, "and then nothing at all, you understand?"\n\nThe man nodded.'+LONG.repeat(6)+'\n\n"Yes."'),u('3'),
+    a('The lamp swung.\n\n"Then you know. You always knew, and you said nothing, and now here we are, both of us."')
 ];
 
 test('the shape watch names a different shape when recent replies repeat one',()=>{
@@ -135,7 +137,7 @@ test('the shape watch names a different shape when recent replies repeat one',()
         const {prompts}=sample({disruption},120,SAME);
         const changes=prompts.map(p=>p.match(/^Change: (.+)$/m)?.[1]).filter(Boolean);
         assert.ok(changes.length>0,disruption+' should flag four near-identical replies');
-        for(const c of changes)assert.match(c,/^(?:Open |End on |Give dialogue|Let action)/);
+        for(const c of changes)assert.match(c,/^(?:Open |End on |End without|Give dialogue|Let action|Write this reply in \d|Keep this reply under \d|Let this reply run|Keep the dialogue|Spread the dialogue)/);
     }
 });
 

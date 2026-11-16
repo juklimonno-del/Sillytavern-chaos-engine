@@ -27,7 +27,7 @@ test('/dm on starts it for this chat only, /dm off stops it, and the choice is s
     assert.match(on,/^Story DM is on for this chat · heat 0\.0 \(cool\) · no directive yet\.$/);
     assert.equal(b.context.chatMetadata.storyChaosEngineDm.enabled,true);assert.ok(saves>=1);
     assert.match(b.notices.at(-1).args[0],/Story DM is on/);
-    let sent=0;for(let i=0;i<24;i++){b.context.chat.push(u('Go.'));await prepare(b);if(last(b,PACKET)[1])sent++;b.context.chat.push(a('Bonnie answered.'));}
+    let sent=0;for(let i=0;i<24;i++){b.context.chat.push(u('Go.'));await prepare(b);if(/^(?:Event|Payoff|Linger|Form|Lens)/m.test(last(b,PACKET)[1]))sent++;b.context.chat.push(a('Bonnie answered.'));}
     assert.ok(sent>0&&sent<24);
     const other={...b.context,chatId:'other-chat',chatMetadata:{},chat:[...texted()]};b.setContext(other);
     assert.match(b.scope.sceDmCommand('status'),/^Story DM is off for this chat\. Use \/dm on to start it\.$/);
@@ -42,7 +42,7 @@ test('status reports heat and the last directive, and names a globally disabled 
     play(b,60);const st=b.context.chatMetadata.storyChaosEngineDm;
     assert.ok(st.cadence.length>0);
     const text=b.scope.sceDmCommand('status');
-    assert.match(text,/^Story DM is on for this chat · heat \d+\.\d \((?:cool|warm|hot: releasing)\) · last directive \d+ repl(?:y|ies) ago\.$/);
+    assert.match(text,/^Story DM is on for this chat · heat \d+\.\d \((?:cool|warm|hot: releasing)\) · last directive \d+ repl(?:y|ies) ago(?: · shape changes followed \d+\/\d+)?\.$/);
     b.api.settings(b.context).enabled=false;
     assert.match(b.scope.sceDmCommand('status'),/\(the engine itself is switched off\)/);
 });
