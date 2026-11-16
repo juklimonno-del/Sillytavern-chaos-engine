@@ -44,7 +44,7 @@ test('heat turns the table toward payoff and lingering, and blocks new majors wh
 });
 
 test('heat rises with notable and major results, falls with release and fades over replies, and rolls back for swipes',()=>{
-    const b=shipped();const {scope}=b;const key=scope.getChatKey(b.context);
+    const b=shipped();const {scope}=b;const key=scope.sceDmState(b.context);
     scope.sceDmCommit(key,2,{kind:'major'});scope.sceDmCommit(key,4,{kind:'complication'});
     assert.ok(Math.abs(scope.sceDmHeat(key,4)-1.9)<1e-9);
     assert.ok(Math.abs(scope.sceDmHeat(key,5)-2.85)<1e-9);

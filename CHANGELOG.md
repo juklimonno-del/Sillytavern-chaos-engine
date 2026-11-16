@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.9.7 — November 16, 2026
+
+The DM is switched on per chat, and its state is saved in the chat.
+
+- New slash command: `/dm on`, `/dm off`, `/dm status`. It works without the settings panel and answers with a notice.
+- A chat runs the engine only after `/dm on`, like a chat-bound lorebook. Existing chats start off. While a chat is off, nothing is injected (no packet, index or ledger format) and tool mode returns `{}`; old `[sce_tracker]` blocks are still removed from the outgoing history. An untouched chat file is never written to.
+- Heat, recent DM results and the cadence cooldown are stored in the chat metadata (`storyChaosEngineDm`), so they survive reloads and travel with the chat. Damaged values are cleaned on read.
+- `/dm status` reports on/off, heat (cool / warm / hot) and how many replies ago the last directive went out, and says when the engine itself is switched off.
+- Add `tests/chat197.test.cjs`; older suites run with the chat switched on.
+
 ## 1.9.6 — November 16, 2026
 
 Invisible DM: events with scale, and tension that releases.
