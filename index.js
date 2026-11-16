@@ -1,7 +1,7 @@
 // Story Chaos Engine v1.8.4. Browser-only; no extra model calls or telemetry.
 // Pure selection/analysis helpers are kept separate from the host lifecycle below.
 'use strict';
-const SCE_VERSION = '1.9.4';
+const SCE_VERSION = '1.9.5';
 const SCE_SETTINGS_KEY = 'storyChaosEngine';
 const SCE_PROMPT_ID = 'story_chaos_engine_auto';
 // Static ledger format, placed with the system prompt so it is read once and cached; only per-turn lines ride in the packet.
@@ -418,6 +418,10 @@ function sceEndings(palette,level='off'){
 // Disruption (1.8.4). One break per packet, rolled apart from the cue palette. Every line escalates, swerves or complicates; none deflates.
 // "swerve" breaks are available from Low up. "hard" reversals join them at Max only.
 const SCE_DISRUPTION_LEVELS = ['off','low','medium','high','max'];
+// Cadence (1.9.5). Average replies per firing turn. Outside 'every', most replies get no packet and a firing turn
+// carries exactly one directive, so nothing is stacked and nothing contradicts.
+const SCE_CADENCES = {every:1,half:2,quarter:4,sixth:6};
+const SCE_CADENCE_HISTORY = new Map();
 const SCE_DISRUPTION_CHANCE = {off:0,low:.3,medium:.55,high:.8,max:1};
 const SCE_DISRUPTION_STEP = {off:0,low:.25,medium:.5,high:.75,max:1};
 const SCE_DISRUPTION_HARD_SHARE = 45;
@@ -481,7 +485,7 @@ const SCE_WORD_STOP = new Set([...SCE_STOP,...('two three four five six seven ei
     'seem seems seemed maybe perhaps almost enough another could\'ve would\'ve').split(' ')]);
 const SCE_HIDDEN_TAGS = ['think','thinking','analysis','reasoning','cot','brainstorm','planning',
     'tracker','scene_tracker','state_tracker','sce_tracker','hidden','ooc','metadata','script','style'];
-const SCE_ADV_DEFAULTS = {intensity:55,maxLayers:3,contextGravity:75,contextScope:'full',customKeywords:'',keywordBoost:30,antiRepeat:true,cuePalette:'neutral',disruption:'high'};
+const SCE_ADV_DEFAULTS = {intensity:55,maxLayers:3,contextGravity:75,contextScope:'full',customKeywords:'',keywordBoost:30,antiRepeat:true,cuePalette:'neutral',disruption:'high',cadence:'quarter'};
 const SCE_STRUCTURE_DEFAULTS = {structureEnabled:false,structureInfluence:65,beatDensity:55,structureGrounding:75,structureAntiRepeat:true};
 const SCE_FEEDBACK_DEFAULTS = {feedbackObserverEnabled:false,feedbackBalancerEnabled:false,feedbackStrength:65,feedbackWindow:8};
 const SCE_ENDING_WATCH_DEFAULTS = {endingWatchEnabled:false,endingWatchStrength:85,endingWatchWindow:8,endingWatchMinimum:3};
@@ -513,6 +517,7 @@ function sceSettings(context=sceContext()) {
     if(!['full','recent'].includes(s.contextScope))s.contextScope='full';
     if(!SCE_PALETTES.includes(s.cuePalette))s.cuePalette='neutral';
     if(!SCE_DISRUPTION_LEVELS.includes(s.disruption))s.disruption='high';
+    if(!SCE_CADENCES[s.cadence])s.cadence='quarter';
     for(const key of ['customKeywords','hiddenTags'])s[key]=typeof s[key]==='string'?s[key].slice(0,2400):'';
     for(const key of ['feedbackWindow','endingWatchWindow'])s[key]=[4,8,16].includes(Number(s[key]))?Number(s[key]):8;
     s.endingWatchMinimum=Math.min(s.endingWatchWindow,[3,4,5].includes(Number(s.endingWatchMinimum))?Number(s.endingWatchMinimum):3);
@@ -1398,7 +1403,33 @@ function sceFormatCombined(roll,structure,watch=null,marker='',shape=null,autono
     lines.push('</scene_direction>');
     return lines.join('\n');
 }
-function sceBuildPacket(context=sceContext(),preview=false,type='normal',marker=''){
+// Position = assistant replies before the one being written, so swipes, regenerations and deletions roll back.
+function sceCadencePosition(entries){return entries.filter(x=>x.message&&!x.message.is_user&&!x.message.is_system).length;}
+// After a firing turn the next reply is always quiet; after that each reply fires with p = 1/(n-1), so the mean gap is n.
+// A gap of 2n forces a fire. Without history (new session) there is no cooldown and no forced fire.
+function sceCadenceFires(key,s,position){
+    const n=SCE_CADENCES[s.cadence]||4;if(n<=1)return true;
+    const fired=(SCE_CADENCE_HISTORY.get(key)||[]).filter(p=>p<position),lastP=fired.length?Math.max(...fired):null;
+    if(lastP!==null&&position-lastP<2)return false;
+    if(lastP!==null&&position-lastP>=2*n)return true;
+    return randomInt(1000)<Math.round(1000/(n-1));
+}
+function sceCadenceCommit(key,position,fired){
+    const kept=(SCE_CADENCE_HISTORY.get(key)||[]).filter(p=>p<position);
+    SCE_CADENCE_HISTORY.set(key,(fired?[...kept,position]:kept).slice(-10));
+}
+// One directive per firing turn: a Break, a Form (with its own phases and close), a single Lens, or a correction.
+function sceSingleDirective(creative,structure,warning,shape){
+    const options=[creative.disruption&&'break',structure&&'form',creative.layers.length&&'lens',(warning||shape)&&'fix'].filter(Boolean);
+    const choice=pick(options);
+    creative.word_sparks=[];creative.anchor=null;
+    if(choice!=='break')creative.disruption=null;
+    creative.layers=choice==='lens'?creative.layers.slice(0,1):[];
+    return {choice,structure:choice==='form'?{...structure,anchors:[]}:null,
+        warning:choice==='fix'?warning:null,shape:choice==='fix'&&!warning?shape:null};
+}
+// live: a real request (the interceptor builds with preview=true and commits creative history on verified completion).
+function sceBuildPacket(context=sceContext(),preview=false,type='normal',marker='',live=false){
     const s=structuredCloneSafe(sceSettings(context));
     const snapshot={...context,_sceSettings:s,_sceEntries:sceSnapshot(context,type)};
     snapshot._sceIndex=sceWordIndex(snapshot);
@@ -1408,9 +1439,20 @@ function sceBuildPacket(context=sceContext(),preview=false,type='normal',marker=
     const shape=sceShapeWatch(snapshot,type,!!warning);
     // Autonomy lines carry their own budget so the ledger never squeezes out the creative lenses.
     const autonomy=sceAutonomyRoll(snapshot,type),allowance=250+(autonomy?.words||0);
-    let prompt=sceFormatCombined(creative,structure,warning,marker,shape,autonomy);
-    while(prompt.split(/\s+/u).length>allowance&&creative.layers.length>1){creative.layers.pop();prompt=sceFormatCombined(creative,structure,warning,marker,shape,autonomy);}
-    const packet={prompt,creative,structure,warning,shape,autonomy,settings:s,snapshot,words:prompt?prompt.trim().split(/\s+/u).length:0};
+    // The panel preview always shows a firing turn so there is something to inspect. Tool mode is the model asking, so no cadence there.
+    // The cadence decision is recorded when a real request is prepared; a failed or stopped reply is re-decided by its swipe.
+    const key=getChatKey(context),position=sceCadencePosition(snapshot._sceEntries),cadenced=s.mode==='automatic'&&(SCE_CADENCES[s.cadence]||4)>1;
+    const fires=(preview&&!live)||sceCadenceFires(key,s,position);
+    let kept={structure,warning,shape},directive=null;
+    if(cadenced){
+        if(fires){kept=sceSingleDirective(creative,structure,warning,shape);directive=kept.choice;}
+        else{creative.disruption=null;creative.layers=[];creative.word_sparks=[];creative.anchor=null;kept={structure:null,warning:null,shape:null};}
+    }
+    let prompt=sceFormatCombined(creative,kept.structure,kept.warning,marker,kept.shape,autonomy);
+    while(prompt.split(/\s+/u).length>allowance&&creative.layers.length>1){creative.layers.pop();prompt=sceFormatCombined(creative,kept.structure,kept.warning,marker,kept.shape,autonomy);}
+    const packet={prompt,creative,structure:kept.structure,warning:kept.warning,shape:kept.shape,autonomy,settings:s,snapshot,
+        quiet:cadenced&&!fires,directive,words:prompt?prompt.trim().split(/\s+/u).length:0};
+    if(cadenced&&(live||!preview))sceCadenceCommit(key,position,fires&&!!directive);
     if(!preview)sceCommitPacketHistory(context,packet);
     return packet;
 }
@@ -1600,7 +1642,7 @@ function sceFinalizeRun(run=sceActiveRun){
     sceFeedbackComplete(context,run,message,run.targetIndex);sceSetReceipt(context,run);
     if(run.packet&&!run.historyCommitted){sceCommitPacketHistory(context,run.packet);run.historyCommitted=true;}
     if(run.settings.notifyAfterReply&&typeof globalThis.toastr?.info==='function'){
-        run.toast=globalThis.toastr.info('🎲 Host completion verified · '+run.words+' words'+(run.payloadSeen?' · guidance seen in request':' · outgoing guidance unverified'),
+        run.toast=globalThis.toastr.info('🎲 Host completion verified · '+run.words+' words'+(!run.prompt?' · quiet turn, no guidance sent':run.payloadSeen?' · guidance seen in request':' · outgoing guidance unverified'),
             'Story Chaos Engine',{timeOut:2400,extendedTimeOut:800,preventDuplicates:true,progressBar:false});
     }
 }
@@ -1671,7 +1713,7 @@ globalThis.storyChaosEngineInterceptor=async function(chat,_contextSize,_abort,t
         const started=lifecycle?.started??Date.now(),targetIndex=kind==='swipe'?Math.max(0,(context.chat?.length||0)-1):(context.chat?.length||0);
         const prior=kind==='swipe'?context.chat?.[targetIndex]:null;
         const id='SCE-'+(++sceRunCounter)+'-'+randomInt(1000000);
-        const packet=sceBuildPacket(context,true,kind,id);
+        const packet=sceBuildPacket(context,true,kind,id,true);
         // Old ledgers leave the outgoing history; the newest state rides in the packet instead.
         sceAutonomyStripChat(chat,packet.settings);
         // Preparation is synchronous. One atomic replacement, or a clear in the failure handler.
@@ -1688,7 +1730,7 @@ globalThis.storyChaosEngineInterceptor=async function(chat,_contextSize,_abort,t
         sceSetReceipt(context,run);if(run.signal?.aborted)sceMarkUnsuccessful(run,'stopped','Request signal already aborted');
         if(packet.structure&&run.observer)sceFeedbackPending(context,packet.structure.familyId,kind);
         const label=typeof document!=='undefined'?document.getElementById('sce_last_roll'):null;
-        if(label)label.textContent='Prepared '+run.layers+' lens(es) · '+packet.words+' injected words';
+        if(label)label.textContent=packet.quiet?'Quiet turn · no guidance sent':'Prepared '+(packet.directive?packet.directive+' directive':run.layers+' lens(es)')+' · '+packet.words+' injected words';
     }catch(error){
         console.error('[Story Chaos Engine] Preparation failed; ordinary generation remains available.',error);
         sceSafeClear(context);
@@ -1784,7 +1826,7 @@ function sceRefreshUI(){
     const value=(id,v)=>{const el=sceNode(id);if(el)el.value=String(v);};
     const check=(id,v)=>{const el=sceNode(id);if(el)el.checked=!!v;};
     check('enabled',s.enabled&&s.mode!=='off');check('autonomy',s.autonomyEnabled);check('autopilot',s.autopilotEnabled);check('notify',s.notifyAfterReply);
-    value('preset',scePresetMatch(s));value('palette',s.cuePalette);value('disruption',s.disruption);value('keywords',s.customKeywords);value('hidden_tags',s.hiddenTags);value('mode',s.mode);value('role',s.role);value('placement',s.packetPlacement);value('scope',s.contextScope);
+    value('preset',scePresetMatch(s));value('palette',s.cuePalette);value('disruption',s.disruption);value('cadence',s.cadence);value('keywords',s.customKeywords);value('hidden_tags',s.hiddenTags);value('mode',s.mode);value('role',s.role);value('placement',s.packetPlacement);value('scope',s.contextScope);
     check('antirepeat',s.antiRepeat);check('structure_anti_repeat',s.structureAntiRepeat);
     for(const [id,key] of SCE_UI_SLIDERS){value(id,s[key]);const out=sceNode(id+'_out');if(out)out.textContent=s[key]+(id==='layers'?'':'%');}
     for(const [id,key] of [['feedback_window','feedbackWindow'],['ending_window','endingWatchWindow'],['ending_minimum','endingWatchMinimum']])value(id,s[key]);
@@ -1809,6 +1851,7 @@ function sceBindUI(){
     on('autopilot','change',e=>{sceMutate(s=>{s.autopilotEnabled=e.target.checked;if(s.autopilotEnabled){s.enabled=true;s.mode='automatic';}});sceSyncTool();});
     on('apply_preset','click',()=>sceApplyPreset(sceContext(),sceNode('preset').value));
     on('palette','change',e=>sceMutate(s=>{s.cuePalette=SCE_PALETTES.includes(e.target.value)?e.target.value:'neutral';}));
+    on('cadence','change',e=>sceMutate(s=>{s.cadence=SCE_CADENCES[e.target.value]?e.target.value:'quarter';}));
     on('disruption','change',e=>sceMutate(s=>{s.disruption=SCE_DISRUPTION_LEVELS.includes(e.target.value)?e.target.value:'high';}));
     on('keywords','input',e=>sceMutate(s=>{s.customKeywords=e.target.value.slice(0,2400);}));
     on('hidden_tags','input',e=>sceMutate(s=>{s.hiddenTags=e.target.value.slice(0,2400);}));
@@ -1854,6 +1897,7 @@ function sceInit(){
         '<small>Autopilot supplies defaults. Explicit feature Off overrides are always honored.</small>'+
         '<label for="sce_preset">Creative tuning</label><div class="sce_actions"><select class="text_pole" id="sce_preset"><option value="custom">Custom / current settings</option><option value="subtle">Subtle</option><option value="balanced">Balanced</option><option value="wild">Wild</option></select><button type="button" class="menu_button" id="sce_apply_preset">Apply preset</button></div>'+
         '<label for="sce_palette">Cue palette</label><select class="text_pole" id="sce_palette"><option value="neutral">Neutral (default)</option><option value="intense">Intense</option><option value="everyday">Everyday (1.8.0 cues)</option></select>'+
+        '<label for="sce_cadence">Cadence</label><select class="text_pole" id="sce_cadence"><option value="every">Every reply (stacked)</option><option value="half">About 1 in 2 replies</option><option value="quarter">About 1 in 4 replies (default)</option><option value="sixth">About 1 in 6 replies</option></select>'+
         '<label for="sce_disruption">Disruption</label><select class="text_pole" id="sce_disruption"><option value="off">Off</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High (default)</option><option value="max">Max (adds hard reversals)</option></select>'+
         '<small>Neutral and Intense keep the scene’s own tone and skip the Deliberate anti-climax and Elastic time structures plus the humor cues. Intense adds stakes and consequence cues. Everyday restores the 1.8.0 library.</small>'+
         '<label class="sce_line" for="sce_autonomy"><span>Character autonomy</span><input type="checkbox" id="sce_autonomy"></label>'+

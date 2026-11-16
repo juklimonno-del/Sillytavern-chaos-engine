@@ -1,8 +1,14 @@
-# Story Chaos Engine 1.9.4
+# Story Chaos Engine 1.9.5
 
 Browser-side creative guidance for SillyTavern. One ordinary model request, one per-turn packet near the end of the prompt (plus a fixed label index, and a fixed ledger format when autonomy is on, both with the system prompt), no additional inference service, analytics, or API key.
 
-**Release:** 1.9.4 autonomy opt-in, the 1.9.3 packet clarity update, the 1.9.2 placement update, and the 1.9.1 ledger fix for the 1.9.0 character autonomy update, on top of the 1.8.4 disruption update, the 1.8.3 packet-format and tone update, and the 1.8.0 Structural Entropy expansion, itself based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. The release pull request and its GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.x or 1.9.x test results.
+**Release:** 1.9.5 cadence update, the 1.9.4 autonomy opt-in, the 1.9.3 packet clarity update, the 1.9.2 placement update, and the 1.9.1 ledger fix for the 1.9.0 character autonomy update, on top of the 1.8.4 disruption update, the 1.8.3 packet-format and tone update, and the 1.8.0 Structural Entropy expansion, itself based on the published 1.7.1 commit `ea19a6c6bd738f6c0eb6ebf4e43728a4103bfab9`. The release pull request and its GitHub Actions checks record current validation. `VERIFICATION.md` and `validation/*` remain historical evidence from the 1.7.1 archive; they are not 1.8.x or 1.9.x test results.
+
+## What changed in 1.9.5
+
+- **Cadence.** By default the engine now directs about one reply in four, never two in a row, and sends nothing at all on the other replies. Earlier versions stacked a Break, several Lenses, a shape change and random words onto every reply, which pulled the model in different directions at once.
+- **One directive per firing turn.** A firing turn carries a single Break, Form, Lens or repetition correction, never a stack.
+- The **Cadence** menu in the panel offers *Every reply (stacked)* for the old behavior, and *About 1 in 2* or *About 1 in 6*.
 
 ## What changed in 1.9.4
 
@@ -81,7 +87,7 @@ The everyday panel has an **Engine enabled** master switch, **Autopilot**, your 
 
 The normal updater follows the installed repository branch. Use `main` for published releases. Back up local modifications before updating.
 
-Use SillyTavern's Extension Manager to install or update from [juklimonno-del/Sillytavern-chaos-engine](https://github.com/juklimonno-del/Sillytavern-chaos-engine), reload SillyTavern, and confirm that both the installed manifest and panel show **1.9.4**.
+Use SillyTavern's Extension Manager to install or update from [juklimonno-del/Sillytavern-chaos-engine](https://github.com/juklimonno-del/Sillytavern-chaos-engine), reload SillyTavern, and confirm that both the installed manifest and panel show **1.9.5**.
 
 ### Optional manual update from the recorded 1.7.1 files
 
@@ -101,7 +107,7 @@ The script makes a timestamped backup beside the target directory, atomically re
 
 The deployable runtime files are `manifest.json`, `entry.js`, `index.js`, and `style.css`; retain `LICENSE`. A new manual installation can place those in one third-party extension folder. Do not enable two copies. For a manual update from the exact recorded v1.7.1 files, the applier preserves `.git` and unrelated files instead of replacing the whole directory. If it detects modified or newer files, reconcile those changes manually. Keep local changes backed up before using the host's updater again.
 
-Restart/reload SillyTavern and check that the panel says **v1.9.4**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
+Restart/reload SillyTavern and check that the panel says **v1.9.5**. Turn Autopilot on to let it supply automatic feature defaults. Presets change tuning only after **Apply preset** is clicked. Existing keyword banks and category/family weights are not replaced by a preset.
 
 ## Controls that mean what they say
 
