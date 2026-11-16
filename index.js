@@ -1,7 +1,7 @@
 // Story Chaos Engine v1.8.4. Browser-only; no extra model calls or telemetry.
 // Pure selection/analysis helpers are kept separate from the host lifecycle below.
 'use strict';
-const SCE_VERSION = '1.9.8';
+const SCE_VERSION = '1.9.9';
 const SCE_SETTINGS_KEY = 'storyChaosEngine';
 const SCE_PROMPT_ID = 'story_chaos_engine_auto';
 // Static ledger format, placed with the system prompt so it is read once and cached; only per-turn lines ride in the packet.
@@ -434,7 +434,8 @@ function sceDmClean(st){
     st.events=(Array.isArray(st.events)?st.events:[]).filter(e=>sceObject(e)&&Number.isSafeInteger(e.pos)&&Object.hasOwn(SCE_DM_HEAT,e.kind))
         .map(e=>({pos:e.pos,kind:e.kind,delta:SCE_DM_HEAT[e.kind]})).slice(-20);
     st.shapes=(Array.isArray(st.shapes)?st.shapes:[]).filter(e=>sceObject(e)&&Number.isSafeInteger(e.pos)&&Object.hasOwn(SCE_SHAPE_DIMENSION,e.trait)
-        &&['string','number'].includes(typeof e.from)).map(e=>({pos:e.pos,trait:e.trait,from:e.from,done:e.done===true})).slice(-12);
+        &&['string','number'].includes(typeof e.from)&&(e.trait!=='floor'||Number.isSafeInteger(e.min)))
+        .map(e=>({pos:e.pos,trait:e.trait,from:e.from,...(e.trait==='floor'?{min:e.min}:{}),done:e.done===true})).slice(-12);
     const stats=sceObject(st.shapeStats)?st.shapeStats:{};
     st.shapeStats=Object.fromEntries(Object.keys(SCE_SHAPE_DIMENSION).filter(k=>sceObject(stats[k])).map(k=>{
         const sent=Math.max(0,Math.min(1e6,Math.floor(Number(stats[k].sent)||0)));
@@ -605,7 +606,7 @@ const SCE_WORD_STOP = new Set([...SCE_STOP,...('two three four five six seven ei
     'seem seems seemed maybe perhaps almost enough another could\'ve would\'ve').split(' ')]);
 const SCE_HIDDEN_TAGS = ['think','thinking','analysis','reasoning','cot','brainstorm','planning',
     'tracker','scene_tracker','state_tracker','sce_tracker','hidden','ooc','metadata','script','style'];
-const SCE_ADV_DEFAULTS = {intensity:55,maxLayers:3,contextGravity:75,contextScope:'full',customKeywords:'',keywordBoost:30,antiRepeat:true,cuePalette:'neutral',disruption:'high',cadence:'quarter'};
+const SCE_ADV_DEFAULTS = {intensity:55,maxLayers:3,contextGravity:75,contextScope:'full',customKeywords:'',keywordBoost:30,antiRepeat:true,cuePalette:'neutral',disruption:'high',cadence:'quarter',minParagraphs:5};
 const SCE_STRUCTURE_DEFAULTS = {structureEnabled:false,structureInfluence:65,beatDensity:55,structureGrounding:75,structureAntiRepeat:true};
 const SCE_FEEDBACK_DEFAULTS = {feedbackObserverEnabled:false,feedbackBalancerEnabled:false,feedbackStrength:65,feedbackWindow:8};
 const SCE_ENDING_WATCH_DEFAULTS = {endingWatchEnabled:false,endingWatchStrength:85,endingWatchWindow:8,endingWatchMinimum:3};
@@ -638,6 +639,7 @@ function sceSettings(context=sceContext()) {
     if(!SCE_PALETTES.includes(s.cuePalette))s.cuePalette='neutral';
     if(!SCE_DISRUPTION_LEVELS.includes(s.disruption))s.disruption='high';
     if(!SCE_CADENCES[s.cadence])s.cadence='quarter';
+    s.minParagraphs=Number.isFinite(Number(s.minParagraphs))?Math.max(0,Math.min(12,Math.round(Number(s.minParagraphs)))):5;
     for(const key of ['customKeywords','hiddenTags'])s[key]=typeof s[key]==='string'?s[key].slice(0,2400):'';
     for(const key of ['feedbackWindow','endingWatchWindow'])s[key]=[4,8,16].includes(Number(s[key]))?Number(s[key]):8;
     s.endingWatchMinimum=Math.min(s.endingWatchWindow,[3,4,5].includes(Number(s.endingWatchMinimum))?Number(s.endingWatchMinimum):3);
@@ -1081,13 +1083,18 @@ function sceSkeleton(text){
         sequence:paras.map(x=>/^["“]/u.test(x)||sceSpeechShare(x)>=.35?'D':'N').join('')};
 }
 // Which skeleton value a trait is breaking.
-const SCE_SHAPE_DIMENSION = {paragraphs:'paragraphs',length:'length',sequence:'sequence',opening:'opener',ending:'close',question:'close',speech:'speech',narration:'speech'};
+const SCE_SHAPE_DIMENSION = {floor:'paragraphs',paragraphs:'paragraphs',length:'length',sequence:'sequence',opening:'opener',ending:'close',question:'close',speech:'speech',narration:'speech'};
 function sceShapeFollowRate(stats,trait){const t=stats?.[trait];return ((t?.followed||0)+1)/((t?.sent||0)+2);}
 function sceShapeWatch(context=sceContext(),type='normal',closingWatchActive=false,stats=null){
     const s=context?._sceSettings||sceSettings(context),level=sceDisruptionLevel(s);
     if(level==='off')return null;
     const samples=sceFeedbackReplyEntries(context,4,type);if(samples.length<4)return null;
     const need=level==='low'||level==='medium'?4:3;
+    // Paragraph floor (1.9.9): a reply under the floor is answered first, and no change ever asks for fewer paragraphs
+    // or a shorter reply than the floor allows.
+    const floor=s.minParagraphs||0,last=samples.at(-1);
+    if(floor>1&&last){const latest=sceSkeleton(sceRecord(last.message,s).clean);
+        if(latest.paragraphs<floor)return {trait:'floor',text:'Write this reply in at least '+floor+' paragraphs.',from:latest.paragraphs,min:floor};}
     const sk=samples.map(x=>sceSkeleton(sceRecord(x.message,s).clean)),latest=sk.at(-1);
     const repeats=(key,value=latest[key])=>sk.filter(x=>x[key]===value).length>=need;
     const found=[],add=(trait,text)=>found.push({trait,text,from:latest[SCE_SHAPE_DIMENSION[trait]]});
@@ -1102,12 +1109,13 @@ function sceShapeWatch(context=sceContext(),type='normal',closingWatchActive=fal
     if(sk.every(x=>x.speech==='low'))add('speech','Give dialogue the lead in this reply.');
     if(sk.every(x=>x.speech==='high'))add('narration','Let action and description carry this reply, with little speech.');
     if(repeats('paragraphs')){
-        const n=latest.paragraphs,target=n>=4?2:n===3?pick([1,5]):n===2?4:3;
+        const n=latest.paragraphs,target=floor>1?pick([floor,floor+1,floor+2,floor+3].filter(x=>x!==n)):n>=4?2:n===3?pick([1,5]):n===2?4:3;
         add('paragraphs','Write this reply in '+target+' paragraph'+(target>1?'s':'')+'.');
     }
     if(repeats('length')){
         const mean=sk.reduce((t,x)=>t+x.words,0)/sk.length;
-        add('length',latest.length>=2?'Keep this reply under '+Math.max(40,Math.round(mean*.5/10)*10)+' words.'
+        if(floor>1&&latest.length<3)add('length','Let this reply run to about '+Math.max(floor*70,Math.round(mean*1.5/10)*10)+' words.');
+        else if(floor<=1)add('length',latest.length>=2?'Keep this reply under '+Math.max(40,Math.round(mean*.5/10)*10)+' words.'
             :'Let this reply run to about '+Math.max(150,Math.round(mean*2/10)*10)+' words.');
     }
     if(latest.paragraphs>=3&&repeats('sequence'))add('sequence',/^(?:ND)+N?$|^(?:DN)+D?$/u.test(latest.sequence)
@@ -1124,11 +1132,11 @@ function sceShapeEvaluate(state,entries,s,position){
         if(entry.done||!replies[entry.pos])continue;
         const value=sceSkeleton(sceRecord(replies[entry.pos].message,s).clean)[SCE_SHAPE_DIMENSION[entry.trait]];
         const t=state.shapeStats[entry.trait]||(state.shapeStats[entry.trait]={sent:0,followed:0});
-        t.sent++;if(value!==entry.from)t.followed++;entry.done=true;
+        t.sent++;if(entry.trait==='floor'?value>=entry.min:value!==entry.from)t.followed++;entry.done=true;
     }
 }
 function sceShapeCommit(state,position,shape){
-    if(shape)state.shapes=[...state.shapes,{pos:position,trait:shape.trait,from:shape.from,done:false}].slice(-12);
+    if(shape)state.shapes=[...state.shapes,{pos:position,trait:shape.trait,from:shape.from,...(shape.min?{min:shape.min}:{}),done:false}].slice(-12);
 }
 // Character autonomy (1.9.0). The model writes a compact [sce_tracker] ledger after each reply (the <sce_tracker> form is still read).
 // State is always derived from the surviving chat, never stored separately, so swipes, edits,
@@ -2036,7 +2044,7 @@ function sceRefreshUI(){
     const value=(id,v)=>{const el=sceNode(id);if(el)el.value=String(v);};
     const check=(id,v)=>{const el=sceNode(id);if(el)el.checked=!!v;};
     check('enabled',s.enabled&&s.mode!=='off');check('autonomy',s.autonomyEnabled);check('autopilot',s.autopilotEnabled);check('notify',s.notifyAfterReply);
-    value('preset',scePresetMatch(s));value('palette',s.cuePalette);value('disruption',s.disruption);value('cadence',s.cadence);value('keywords',s.customKeywords);value('hidden_tags',s.hiddenTags);value('mode',s.mode);value('role',s.role);value('placement',s.packetPlacement);value('scope',s.contextScope);
+    value('preset',scePresetMatch(s));value('palette',s.cuePalette);value('disruption',s.disruption);value('cadence',s.cadence);value('min_paragraphs',s.minParagraphs);value('keywords',s.customKeywords);value('hidden_tags',s.hiddenTags);value('mode',s.mode);value('role',s.role);value('placement',s.packetPlacement);value('scope',s.contextScope);
     check('antirepeat',s.antiRepeat);check('structure_anti_repeat',s.structureAntiRepeat);
     for(const [id,key] of SCE_UI_SLIDERS){value(id,s[key]);const out=sceNode(id+'_out');if(out)out.textContent=s[key]+(id==='layers'?'':'%');}
     for(const [id,key] of [['feedback_window','feedbackWindow'],['ending_window','endingWatchWindow'],['ending_minimum','endingWatchMinimum']])value(id,s[key]);
@@ -2061,6 +2069,7 @@ function sceBindUI(){
     on('autopilot','change',e=>{sceMutate(s=>{s.autopilotEnabled=e.target.checked;if(s.autopilotEnabled){s.enabled=true;s.mode='automatic';}});sceSyncTool();});
     on('apply_preset','click',()=>sceApplyPreset(sceContext(),sceNode('preset').value));
     on('palette','change',e=>sceMutate(s=>{s.cuePalette=SCE_PALETTES.includes(e.target.value)?e.target.value:'neutral';}));
+    on('min_paragraphs','change',e=>sceMutate(s=>{const n=Number(e.target.value);s.minParagraphs=Number.isFinite(n)?Math.max(0,Math.min(12,Math.round(n))):5;}));
     on('cadence','change',e=>sceMutate(s=>{s.cadence=SCE_CADENCES[e.target.value]?e.target.value:'quarter';}));
     on('disruption','change',e=>sceMutate(s=>{s.disruption=SCE_DISRUPTION_LEVELS.includes(e.target.value)?e.target.value:'high';}));
     on('keywords','input',e=>sceMutate(s=>{s.customKeywords=e.target.value.slice(0,2400);}));
@@ -2107,6 +2116,7 @@ function sceInit(){
         '<small>Autopilot supplies defaults. Explicit feature Off overrides are always honored.</small>'+
         '<label for="sce_preset">Creative tuning</label><div class="sce_actions"><select class="text_pole" id="sce_preset"><option value="custom">Custom / current settings</option><option value="subtle">Subtle</option><option value="balanced">Balanced</option><option value="wild">Wild</option></select><button type="button" class="menu_button" id="sce_apply_preset">Apply preset</button></div>'+
         '<label for="sce_palette">Cue palette</label><select class="text_pole" id="sce_palette"><option value="neutral">Neutral (default)</option><option value="intense">Intense</option><option value="everyday">Everyday (1.8.0 cues)</option></select>'+
+        '<label for="sce_min_paragraphs">Minimum paragraphs (0 = no floor)</label><input class="text_pole" id="sce_min_paragraphs" type="number" min="0" max="12" step="1">'+
         '<label for="sce_cadence">Cadence</label><select class="text_pole" id="sce_cadence"><option value="every">Every reply (stacked)</option><option value="half">About 1 in 2 replies</option><option value="quarter">About 1 in 4 replies (default)</option><option value="sixth">About 1 in 6 replies</option></select>'+
         '<label for="sce_disruption">Disruption</label><select class="text_pole" id="sce_disruption"><option value="off">Off</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High (default)</option><option value="max">Max (adds hard reversals)</option></select>'+
         '<small>Neutral and Intense keep the scene’s own tone and skip the Deliberate anti-climax and Elastic time structures plus the humor cues. Intense adds stakes and consequence cues. Everyday restores the 1.8.0 library.</small>'+

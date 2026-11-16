@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.9.9 — November 16, 2026
+
+Paragraph floor.
+
+- New **Minimum paragraphs** setting (`minParagraphs`), default **5**, applied to existing installations; 0 turns the floor off, maximum 12.
+- When the latest reply is under the floor, the next packet carries `Change: Write this reply in at least 5 paragraphs.` ahead of any other shape change. It counts as followed only when the next reply reaches the floor.
+- With a floor, shape changes never ask for fewer paragraphs than the floor or for a shorter reply: a repeated paragraph count is answered with a different count at or above the floor, and a repeated length is only ever asked to run longer (at least 70 words per floor paragraph).
+- Add `tests/floor199.test.cjs`; older suites run with the floor off.
+
 ## 1.9.8 — November 16, 2026
 
 Structure repetition is answered from what the model actually wrote.
