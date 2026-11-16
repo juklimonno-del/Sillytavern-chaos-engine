@@ -1,7 +1,7 @@
 // Story Chaos Engine v1.8.4. Browser-only; no extra model calls or telemetry.
 // Pure selection/analysis helpers are kept separate from the host lifecycle below.
 'use strict';
-const SCE_VERSION = '1.9.6';
+const SCE_VERSION = '1.9.7';
 const SCE_SETTINGS_KEY = 'storyChaosEngine';
 const SCE_PROMPT_ID = 'story_chaos_engine_auto';
 // Static ledger format, placed with the system prompt so it is read once and cached; only per-turn lines ride in the packet.
@@ -424,7 +424,26 @@ const SCE_DISRUPTION_LEVELS = ['off','low','medium','high','max'];
 // Cadence (1.9.5). Average replies per firing turn. Outside 'every', most replies get no packet and a firing turn
 // carries exactly one directive, so nothing is stacked and nothing contradicts.
 const SCE_CADENCES = {every:1,half:2,quarter:4,sixth:6};
-const SCE_CADENCE_HISTORY = new Map();
+// Per-chat DM state (1.9.7) lives in the chat file next to a chat-bound lorebook link, so it survives reloads
+// and travels with the chat. A chat runs the engine only after /dm on.
+const SCE_DM_META = 'storyChaosEngineDm';
+const SCE_DM_FALLBACK = new Map();
+function sceDmClean(st){
+    st.enabled=st.enabled===true;
+    st.cadence=(Array.isArray(st.cadence)?st.cadence:[]).filter(Number.isSafeInteger).slice(-10);
+    st.events=(Array.isArray(st.events)?st.events:[]).filter(e=>sceObject(e)&&Number.isSafeInteger(e.pos)&&Object.hasOwn(SCE_DM_HEAT,e.kind))
+        .map(e=>({pos:e.pos,kind:e.kind,delta:SCE_DM_HEAT[e.kind]})).slice(-20);
+    return st;
+}
+function sceChatOn(context){const st=context?.chatMetadata?.[SCE_DM_META];return sceObject(st)&&st.enabled===true;}
+// Hosts without chat metadata keep state in memory for the session.
+function sceDmState(context){
+    const m=context?.chatMetadata;
+    if(!sceObject(m)){const key=getChatKey(context);if(!SCE_DM_FALLBACK.has(key))SCE_DM_FALLBACK.set(key,{enabled:false});return sceDmClean(SCE_DM_FALLBACK.get(key));}
+    if(!sceObject(m[SCE_DM_META]))m[SCE_DM_META]={enabled:false};
+    return sceDmClean(m[SCE_DM_META]);
+}
+function sceDmSave(context){try{context?.saveMetadataDebounced?.();}catch(error){console.warn('[Story Chaos Engine] Unable to save chat state.',error);}}
 function sceDmMode(s){return s?.mode==='automatic'&&(SCE_CADENCES[s.cadence]||4)>1;}
 // Invisible DM (1.9.6). Under cadence, events come from a scaled table instead of the escalating Break pool,
 // and a heat track turns the table toward payoff and lingering after notable or major events.
@@ -489,10 +508,9 @@ const SCE_DM_HEAT = {minor:0,complication:1,opportunity:1,major:2,payoff:-2,ling
 const SCE_DM_COOL = .05;
 // Share of new events by disruption level: notable (split evenly between complication and opportunity) and major.
 const SCE_DM_SCALE = {low:{notable:.25,major:0},medium:{notable:.3,major:.05},high:{notable:.35,major:.1},max:{notable:.4,major:.2}};
-const SCE_DM_HISTORY = new Map();
-function sceDmHeat(key,position){
+function sceDmHeat(state,position){
     let heat=0,at=0;
-    for(const e of (SCE_DM_HISTORY.get(key)||[]).filter(x=>x.pos<position).sort((a,b)=>a.pos-b.pos)){
+    for(const e of (state?.events||[]).filter(x=>x.pos<position).sort((a,b)=>a.pos-b.pos)){
         heat=Math.max(0,heat-SCE_DM_COOL*(e.pos-at))+e.delta;heat=Math.min(6,Math.max(0,heat));at=e.pos;}
     return Math.max(0,heat-SCE_DM_COOL*(position-at));
 }
@@ -506,17 +524,17 @@ function sceDmTable(level,heat){
     if(heat>=1)table.major=0;
     return table;
 }
-function sceDmRoll(s,key,position,recent=[]){
+function sceDmRoll(s,state,position,recent=[]){
     const level=sceDisruptionLevel(s);if(level==='off')return null;
-    const heat=sceDmHeat(key,position),table=sceDmTable(level,heat);
+    const heat=sceDmHeat(state,position),table=sceDmTable(level,heat);
     const kind=sceWeighted(Object.entries(table).map(([value,weight])=>({value,weight})));
     const pool=SCE_DM_EVENTS[kind],instruction=s.antiRepeat?pickFresh(pool,recent):pick(pool);
     const label=kind==='payoff'?'Payoff':kind==='linger'?'Linger':'Event ('+(kind==='major'?'major':kind==='minor'?'minor':'notable')+')';
     return {tier:'dm',kind,label,instruction,heat};
 }
-function sceDmCommit(key,position,event){
-    const kept=(SCE_DM_HISTORY.get(key)||[]).filter(x=>x.pos<position);
-    SCE_DM_HISTORY.set(key,(event?[...kept,{pos:position,delta:SCE_DM_HEAT[event.kind]??0,kind:event.kind}]:kept).slice(-20));
+function sceDmCommit(state,position,event){
+    const kept=state.events.filter(x=>x.pos<position);
+    state.events=(event?[...kept,{pos:position,delta:SCE_DM_HEAT[event.kind]??0,kind:event.kind}]:kept).slice(-20);
 }
 const SCE_DISRUPTION_CHANCE = {off:0,low:.3,medium:.55,high:.8,max:1};
 const SCE_DISRUPTION_STEP = {off:0,low:.25,medium:.5,high:.75,max:1};
@@ -1503,16 +1521,16 @@ function sceFormatCombined(roll,structure,watch=null,marker='',shape=null,autono
 function sceCadencePosition(entries){return entries.filter(x=>x.message&&!x.message.is_user&&!x.message.is_system).length;}
 // After a firing turn the next reply is always quiet; after that each reply fires with p = 1/(n-1), so the mean gap is n.
 // A gap of 2n forces a fire. Without history (new session) there is no cooldown and no forced fire.
-function sceCadenceFires(key,s,position){
+function sceCadenceFires(state,s,position){
     const n=SCE_CADENCES[s.cadence]||4;if(n<=1)return true;
-    const fired=(SCE_CADENCE_HISTORY.get(key)||[]).filter(p=>p<position),lastP=fired.length?Math.max(...fired):null;
+    const fired=(state?.cadence||[]).filter(p=>p<position),lastP=fired.length?Math.max(...fired):null;
     if(lastP!==null&&position-lastP<2)return false;
     if(lastP!==null&&position-lastP>=2*n)return true;
     return randomInt(1000)<Math.round(1000/(n-1));
 }
-function sceCadenceCommit(key,position,fired){
-    const kept=(SCE_CADENCE_HISTORY.get(key)||[]).filter(p=>p<position);
-    SCE_CADENCE_HISTORY.set(key,(fired?[...kept,position]:kept).slice(-10));
+function sceCadenceCommit(state,position,fired){
+    const kept=state.cadence.filter(p=>p<position);
+    state.cadence=(fired?[...kept,position]:kept).slice(-10);
 }
 // One directive per firing turn: a Break, a Form (with its own phases and close), a single Lens, or a correction.
 // The DM's own event is the most common directive; forms, lenses and corrections share the rest.
@@ -1540,12 +1558,12 @@ function sceBuildPacket(context=sceContext(),preview=false,type='normal',marker=
     // The panel preview always shows a firing turn so there is something to inspect. Tool mode is the model asking, so no cadence there.
     // The cadence decision is recorded when a real request is prepared; a failed or stopped reply is re-decided by its swipe.
     const key=getChatKey(context),position=sceCadencePosition(snapshot._sceEntries),cadenced=s.mode==='automatic'&&(SCE_CADENCES[s.cadence]||4)>1;
-    const fires=(preview&&!live)||sceCadenceFires(key,s,position);
+    const dmState=sceDmState(context),fires=(preview&&!live)||sceCadenceFires(dmState,s,position);
     let kept={structure,warning,shape},directive=null;
     if(cadenced){
         // The DM replaces the escalating Break pool; heat is read at this reply's position, so swipes re-read it.
         const recentEvents=(sceRecentCueHistory.get(key)||[]).filter(x=>x.startsWith('disruption:')).map(x=>x.slice(11));
-        creative.disruption=fires?sceDmRoll(s,key,position,recentEvents):null;
+        creative.disruption=fires?sceDmRoll(s,dmState,position,recentEvents):null;
         if(fires){kept=sceSingleDirective(creative,structure,warning,shape);directive=kept.choice;}
         else{creative.disruption=null;creative.layers=[];creative.word_sparks=[];creative.anchor=null;kept={structure:null,warning:null,shape:null};}
     }
@@ -1553,7 +1571,7 @@ function sceBuildPacket(context=sceContext(),preview=false,type='normal',marker=
     while(prompt.split(/\s+/u).length>allowance&&creative.layers.length>1){creative.layers.pop();prompt=sceFormatCombined(creative,kept.structure,kept.warning,marker,kept.shape,autonomy);}
     const packet={prompt,creative,structure:kept.structure,warning:kept.warning,shape:kept.shape,autonomy,settings:s,snapshot,
         quiet:cadenced&&!fires,directive,words:prompt?prompt.trim().split(/\s+/u).length:0};
-    if(cadenced&&(live||!preview)){sceCadenceCommit(key,position,fires&&!!directive);sceDmCommit(key,position,directive==='break'?creative.disruption:null);}
+    if(cadenced&&(live||!preview)){sceCadenceCommit(dmState,position,fires&&!!directive);sceDmCommit(dmState,position,directive==='break'?creative.disruption:null);sceDmSave(context);}
     if(!preview)sceCommitPacketHistory(context,packet);
     return packet;
 }
@@ -1573,7 +1591,42 @@ function sceCommitPacketHistory(context,p){
 const SCE_RUN_RECEIPTS=new SceBoundedMap();
 let sceLifecycleStart=null,sceActiveRun=null,sceRunCounter=0,sceRuntimeEnabled=true;
 let sceListeningSource=null,sceListeners=[],sceUiInitObserver=null,sceBootstrapTimer=null;
-let sceToolRegistered=false,sceFinishTimer=null;
+let sceToolRegistered=false,sceFinishTimer=null,sceCommandRegistered=false;
+// /dm on | off | status. Works without the settings panel; the answer is shown as a notice and returned to the pipe.
+function sceDmStatus(context){
+    const st=sceDmState(context),s=sceSettings(context),position=sceCadencePosition(sceSnapshot(context));
+    const last=st.cadence.length?Math.max(...st.cadence):null,heat=sceDmHeat(st,position);
+    const engine=!sceRuntimeEnabled||!s.enabled||s.mode==='off'?' (the engine itself is switched off)':s.mode==='tool'?' (tool mode: the model asks for guidance)':'';
+    if(!st.enabled)return 'Story DM is off for this chat'+engine+'. Use /dm on to start it.';
+    return 'Story DM is on for this chat'+engine+' · heat '+heat.toFixed(1)+(heat>=1.75?' (hot: releasing)':heat>=1?' (warm)':' (cool)')+
+        ' · '+(last===null?'no directive yet':'last directive '+(position-last)+' repl'+(position-last===1?'y':'ies')+' ago')+'.';
+}
+function sceDmCommand(value){
+    const context=sceContext(),arg=String(value??'').trim().toLowerCase()||'status';
+    let text;
+    if(!context||!(context.chatId??context.getCurrentChatId?.()))text='Open a chat first.';
+    else if(!['on','off','status'].includes(arg))text='Usage: /dm on, /dm off or /dm status.';
+    else{
+        if(arg!=='status'){const st=sceDmState(context);st.enabled=arg==='on';sceDmSave(context);}
+        text=sceDmStatus(context);
+    }
+    if(typeof globalThis.toastr?.info==='function')globalThis.toastr.info(text,'Story Chaos Engine',{timeOut:4000,preventDuplicates:true});
+    return text;
+}
+function sceRegisterCommand(context){
+    if(sceCommandRegistered||!context)return;
+    const P=context.SlashCommandParser,C=context.SlashCommand,A=context.SlashCommandArgument;
+    const help='Story DM for this chat: <code>/dm on</code>, <code>/dm off</code>, <code>/dm status</code>.';
+    try{
+        if(P?.addCommandObject&&C?.fromProps){
+            P.addCommandObject(C.fromProps({name:'dm',callback:(_args,value)=>sceDmCommand(value),returns:'the DM status for this chat',helpString:help,
+                unnamedArgumentList:A?.fromProps?[A.fromProps({description:'on, off or status',typeList:['string'],isRequired:false,enumList:['on','off','status']})]:[]}));
+            sceCommandRegistered=true;
+        }else if(typeof context.registerSlashCommand==='function'){
+            context.registerSlashCommand('dm',(_args,value)=>sceDmCommand(value),[],help,true,true);sceCommandRegistered=true;
+        }
+    }catch(error){console.warn('[Story Chaos Engine] Unable to register /dm.',error);}
+}
 function sceClearPrompt(context=sceContext()) {context?.setExtensionPrompt?.(SCE_INDEX_PROMPT_ID,'',0,0,false,0);context?.setExtensionPrompt?.(SCE_LEDGER_PROMPT_ID,'',0,0,false,0);context?.setExtensionPrompt?.(SCE_PROMPT_ID,'',1,0,false,1);}
 // Gemini receives mid-chat system turns as user text, so by default the packet sits just before the user's message
 // and the user's own action is the last thing the model reads. Other sources keep the packet last.
@@ -1796,7 +1849,7 @@ globalThis.storyChaosEngineInterceptor=async function(chat,_contextSize,_abort,t
     try{
         const settings=sceSettings(context),kind=type||'normal';
         sceSubscribeEvents(context);
-        if(kind==='continue'&&sceRuntimeEnabled&&settings.enabled&&settings.mode==='automatic'&&sceAutonomyOn(settings)){
+        if(kind==='continue'&&sceRuntimeEnabled&&settings.enabled&&settings.mode==='automatic'&&sceChatOn(context)&&sceAutonomyOn(settings)){
             const prompt=sceContinuePacket(context,'SCE-'+(++sceRunCounter)+'-'+randomInt(1000000));
             sceAutonomyStripChat(chat,settings);
             sceSetIndex(context,prompt,settings);sceSetLedgerSpec(context,settings);
@@ -1804,7 +1857,7 @@ globalThis.storyChaosEngineInterceptor=async function(chat,_contextSize,_abort,t
             context.setExtensionPrompt(SCE_PROMPT_ID,prompt,1,0,false,settings.role==='system'?0:1);
             return;
         }
-        if(!sceRuntimeEnabled||!settings.enabled||settings.mode!=='automatic'||!['normal','regenerate','swipe'].includes(kind)){
+        if(!sceRuntimeEnabled||!settings.enabled||settings.mode!=='automatic'||!sceChatOn(context)||!['normal','regenerate','swipe'].includes(kind)){
             sceSafeClear(context);if(sceRuntimeEnabled)sceAutonomyStripChat(chat);return;
         }
         if(sceActiveRun){sceReleaseRunSignal(sceActiveRun);if(!['completed','failed','stopped','invalidated'].includes(sceActiveRun.state))
@@ -1843,7 +1896,7 @@ function register(){
     const context=sceContext();if(!context?.registerFunctionTool)return false;
     context.registerFunctionTool({name:'story_chaos_roll',displayName:'Story Chaos Roll',description:'Get optional creative and structural guidance for the next fiction reply. Takes no arguments.',
         parameters:{$schema:'http://json-schema.org/draft-04/schema#',type:'object',properties:{},additionalProperties:false},
-        action:async()=>{const current=sceContext(),s=sceSettings(current);if(!sceRuntimeEnabled||!s.enabled||s.mode!=='tool')return '{}';
+        action:async()=>{const current=sceContext(),s=sceSettings(current);if(!sceRuntimeEnabled||!s.enabled||s.mode!=='tool'||!sceChatOn(current))return '{}';
             // An invoked tool consumes its selections, without asserting response completion.
             const packet=sceBuildPacket(current,false);sceSetReceipt(current,{state:'legacy',prompt:packet.prompt,
                 reason:'Completion monitoring requires automatic mode'});
@@ -1987,7 +2040,7 @@ function sceWaitForSettingsPanel(){
 }
 function sceInit(){
     if(!sceRuntimeEnabled)return;const ctx=sceContext();if(!ctx){sceWaitForSettingsPanel();return;}
-    sceSubscribeEvents(ctx);sceSettings(ctx);sceSyncTool(ctx);
+    sceSubscribeEvents(ctx);sceSettings(ctx);sceSyncTool(ctx);sceRegisterCommand(ctx);
     if(typeof document==='undefined')return;
     const root=document.getElementById('extensions_settings');if(!root){sceWaitForSettingsPanel();return;}
     if(document.getElementById('sce_settings')){sceRefreshUI();return;}

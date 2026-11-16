@@ -16,7 +16,7 @@ function boot(options={},chat=[],seed=12345){
     const events={on(key,fn){if(!handlers.has(key))handlers.set(key,new Set());handlers.get(key).add(fn);},
       removeListener(key,fn){handlers.get(key)?.delete(fn);},emit(key,...args){for(const fn of [...(handlers.get(key)||[])])fn(...args);}};
     const context={chatId:'test-chat',characterId:0,name1:'User',name2:'Bonnie',characters:[{name:'Bonnie',avatar:'bonnie.png'}],
-      mainApi:'openai',onlineStatus:'ready',model:'test-model',chat:chat.map(x=>({...x})),chatMetadata:{},
+      mainApi:'openai',onlineStatus:'ready',model:'test-model',chat:chat.map(x=>({...x})),chatMetadata:{storyChaosEngineDm:{enabled:true}},
       extensionSettings:{storyChaosEngine:{cadence:'every',...options}},extensionPrompts:{},eventSource:events,eventTypes:types,
       setExtensionPrompt(...args){injections.push(args);this.extensionPrompts[args[0]]={value:args[1]};},
       registerFunctionTool(tool){tools.push(tool);},unregisterFunctionTool(){},saveSettingsDebounced(){},saveMetadataDebounced(){}};
