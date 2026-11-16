@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.5 — November 16, 2026
+
+Cadence: the engine stops directing every reply.
+
+- New **Cadence** setting, default *About 1 in 4 replies* (applied to existing installations). Most replies get no packet and no label index. After a firing turn the next reply is always quiet; after that each reply fires with probability 1/(n−1), so the average gap is n replies, and a gap of 2n forces one.
+- A firing turn carries exactly one directive, picked at random from what is available: a Break, a Form (with its phases, transition and close), a single Lens, or a repetition correction (Recurring close / Repeated closing wording / Change). Words in play and the context word are no longer sent under cadence.
+- The decision is recorded per chat position when the request is prepared, so swipes, regenerations and deletions re-decide their own turn.
+- *Every reply (stacked)* restores the 1.9.4 behavior. Tool mode is unaffected, and the panel preview always shows a firing turn.
+- Autonomy lines, when autonomy is on, still ride every reply.
+- The after-reply notice and roll label say when a turn was quiet. Add `tests/cadence195.test.cjs`; older suites pin cadence to *Every reply*.
+
 ## 1.9.4 — November 16, 2026
 
 Character autonomy becomes opt-in, and off means fully off.
