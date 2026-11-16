@@ -31,9 +31,11 @@ for(const type of ['quiet','continue','impersonate'])test(type+' requests do not
     const b=boot({autopilotEnabled:true,autonomyEnabled:false});await prepare(b,type);assert.equal(b.injections.at(-1)[1],'');
 });
 test('continue receives only the autonomy ledger request, never creative or structural cues',async()=>{
-    const b=boot({autopilotEnabled:true,disruption:'max'});await prepare(b,'continue');
+    const b=boot({autopilotEnabled:true,disruption:'max',autonomyEnabled:true,autonomyDefault194:true});await prepare(b,'continue');
     assert.match(b.injections.at(-1)[1],/Ledger: continue the reply/);assert.doesNotMatch(b.injections.at(-1)[1],/^(?:Break|Change|Form|Lens|Drive|Close):/m);
     for(const type of ['quiet','impersonate']){await prepare(b,type);assert.equal(b.injections.at(-1)[1],'',type);}
+    const off=boot({autopilotEnabled:true,disruption:'max'});await prepare(off,'continue');
+    assert.equal(off.injections.at(-1)[1],'','autonomy is off by default, so continue gets nothing');
 });
 test('only installing guidance does not produce a completed receipt',async()=>{
     const b=boot({},[u('Go.')]);const run=await prepare(b);assert.equal(run.state,'prepared');assert.equal(b.notices.length,0);
