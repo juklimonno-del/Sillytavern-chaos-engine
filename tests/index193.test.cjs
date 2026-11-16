@@ -54,9 +54,14 @@ test('every label a packet can emit is defined in the index',async()=>{
         for(let i=0;i<10;i++)collect(b.api.packet(b.context,true).prompt);
         await prepare(b,'continue');collect(last(b,PACKET)[1]);
     }
+    // Cadence turns: the DM's Event / Payoff / Linger labels, rolled live so heat builds up.
+    for(const seed of [1,2]){
+        const b=boot({cadence:'quarter',autopilotEnabled:true,disruption:'max'},[...texted()],seed);
+        for(let i=0;i<400;i++){collect(b.api.packet(b.context,false).prompt);b.context.chat.push(u('I wait.'),a('Bonnie answered.'));}
+    }
     const b=boot({autopilotEnabled:true},[u('Go.')]);await prepare(b);const index=last(b,INDEX)[1];
-    for(const head of ['Break','Form','Route','Phases','Attention','Transition','Lens','Close','State','Want','Stance','Desire','Stall','Drive','Ledger','Recurring close','Repeated closing wording'])assert.ok(heads.has(head),'fixture must exercise '+head);
-    for(const head of heads)assert.match(index,new RegExp('^(?:[^:\\n]*[/] )?'+head.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?: \\(name\\)| /|:)','m'),'index must define '+head);
+    for(const head of ['Break','Form','Route','Phases','Attention','Transition','Lens','Close','State','Want','Stance','Desire','Stall','Drive','Ledger','Recurring close','Repeated closing wording','Event','Payoff','Linger'])assert.ok(heads.has(head),'fixture must exercise '+head);
+    for(const head of heads)assert.match(index,new RegExp('^(?:[^:\\n]*[/] )?'+head.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?: \\(| /|:)','m'),'index must define '+head);
 });
 
 test('with autonomy off the index drops its State, Want, Drive and Ledger entries and stays fixed',async()=>{

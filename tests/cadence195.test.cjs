@@ -5,7 +5,7 @@ const {boot,prepare,assistant:a,user:u,texted}=require('./harness.cjs');
 
 // The harness pins cadence to 'every' for the older suites; these tests use the shipped default.
 const shipped=(o={},...rest)=>boot({cadence:undefined,...o},...rest);
-const DIRECTIVE=/^(?:Break|Form|Lens \(|Recurring close|Repeated closing wording|Change):?/;
+const DIRECTIVE=/^(?:Break|Event \(|Payoff|Linger|Form|Lens \(|Recurring close|Repeated closing wording|Change):?/;
 const directives=p=>p.split('\n').filter(x=>DIRECTIVE.test(x));
 // Simulate a chat: each step appends a user turn and an assistant reply, then rolls the next packet for real.
 function run(opts,steps,seed){

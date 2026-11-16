@@ -1,7 +1,7 @@
 // Story Chaos Engine v1.8.4. Browser-only; no extra model calls or telemetry.
 // Pure selection/analysis helpers are kept separate from the host lifecycle below.
 'use strict';
-const SCE_VERSION = '1.9.5';
+const SCE_VERSION = '1.9.6';
 const SCE_SETTINGS_KEY = 'storyChaosEngine';
 const SCE_PROMPT_ID = 'story_chaos_engine_auto';
 // Static ledger format, placed with the system prompt so it is read once and cached; only per-turn lines ride in the packet.
@@ -12,6 +12,9 @@ const SCE_INDEX_PROMPT_ID = 'story_chaos_engine_index';
 const SCE_INDEX_LINES = ['<scene_direction_index>',
     '<scene_direction> is a per-reply instruction packet. It applies to the next reply only. Its contents are never narrated, quoted, or referenced. Only labels present in the current packet apply.',
     'Break: an event or change to introduce in this reply.',
+    'Event (minor / notable / major): something that happens in the world this reply. Minor needs no response; notable invites one; major changes the situation.',
+    'Payoff: an open thread to resolve this reply.',
+    'Linger: stay in the current moment; introduce nothing new.',
     'Change: a shape adjustment for this reply’s prose.',
     'Form: the arrangement of this reply.',
     'Route: the variant of that arrangement.',
@@ -422,6 +425,99 @@ const SCE_DISRUPTION_LEVELS = ['off','low','medium','high','max'];
 // carries exactly one directive, so nothing is stacked and nothing contradicts.
 const SCE_CADENCES = {every:1,half:2,quarter:4,sixth:6};
 const SCE_CADENCE_HISTORY = new Map();
+function sceDmMode(s){return s?.mode==='automatic'&&(SCE_CADENCES[s.cadence]||4)>1;}
+// Invisible DM (1.9.6). Under cadence, events come from a scaled table instead of the escalating Break pool,
+// and a heat track turns the table toward payoff and lingering after notable or major events.
+const SCE_DM_EVENTS = {
+    minor:[
+        'Something in the surroundings shifts: the light, the weather, a sound from outside.',
+        'Someone passes through on their own business.',
+        'A character notices a physical detail about someone present.',
+        'An object nearby gets used, dropped, broken or found.',
+        'Hunger, cold, fatigue or another bodily need catches up with a character.',
+        'A brief exchange with a bystander, a server or a stranger.',
+        'A character’s habit shows in what they do with their hands.',
+        'Something in the room brings a memory back to a character.',
+        'News, a message or a rumor arrives that matters only a little.',
+        'The place shows something about the people who use it.'
+    ],
+    complication:[
+        'Something the characters need is missing, late or broken.',
+        'A third party wants something from someone present.',
+        'A plan hits a practical obstacle.',
+        'Someone misreads what another character meant, and acts on it.',
+        'A cost comes due: money, time, an injury or a favor.',
+        'Someone with authority over the place takes an interest.',
+        'An earlier action draws attention it should not have.',
+        'A character hits their own limit: fatigue, nerve, skill or patience.'
+    ],
+    opportunity:[
+        'A way through opens: a door, a contact, a lucky break.',
+        'Someone offers help, information or a fair deal.',
+        'A character finds something useful.',
+        'An obstacle turns out easier than expected.',
+        'Someone present lets their guard down.',
+        'A chance arrives that will not last long.',
+        'Help or a gift arrives with a condition attached.',
+        'Something useful turns up, and someone else knows about it too.'
+    ],
+    major:[
+        'The stakes change: what the characters stand to win or lose is now different.',
+        'Someone who matters arrives, leaves or is lost.',
+        'A truth comes out that cannot be taken back.',
+        'A character has to choose between two things they want.',
+        'The place stops being safe, or stops being dangerous.',
+        'A relationship in the scene changes for good.'
+    ],
+    payoff:[
+        'Resolve an open problem from earlier, for better or worse.',
+        'Let an earlier complication pay off or fall away.',
+        'Close a thread that has been left hanging.',
+        'A character gets what they were after, or loses it for good.',
+        'Let the last big event settle into a new normal.'
+    ],
+    linger:[
+        'Stay in this moment and introduce nothing new.',
+        'Let the current exchange run on without any new event.',
+        'Hold the scene where it is and follow what the characters do next.',
+        'No new developments: play out the aftermath of what just happened.',
+        'Stay with the characters’ immediate reactions before anything moves on.'
+    ]
+};
+// Heat added by each result; it fades by SCE_DM_COOL per reply.
+const SCE_DM_HEAT = {minor:0,complication:1,opportunity:1,major:2,payoff:-2,linger:-1};
+const SCE_DM_COOL = .05;
+// Share of new events by disruption level: notable (split evenly between complication and opportunity) and major.
+const SCE_DM_SCALE = {low:{notable:.25,major:0},medium:{notable:.3,major:.05},high:{notable:.35,major:.1},max:{notable:.4,major:.2}};
+const SCE_DM_HISTORY = new Map();
+function sceDmHeat(key,position){
+    let heat=0,at=0;
+    for(const e of (SCE_DM_HISTORY.get(key)||[]).filter(x=>x.pos<position).sort((a,b)=>a.pos-b.pos)){
+        heat=Math.max(0,heat-SCE_DM_COOL*(e.pos-at))+e.delta;heat=Math.min(6,Math.max(0,heat));at=e.pos;}
+    return Math.max(0,heat-SCE_DM_COOL*(position-at));
+}
+function sceDmTable(level,heat){
+    const scale=SCE_DM_SCALE[level]||SCE_DM_SCALE.high;
+    const fresh={minor:1-scale.notable-scale.major,complication:scale.notable/2,opportunity:scale.notable/2,major:scale.major};
+    // Hot: mostly release. Warm: some release, fewer new notables, no new majors. Cool: new events only.
+    const blend=heat>=1.75?{release:.8,payoff:.55}:heat>=1?{release:.4,payoff:.55}:{release:0,payoff:0};
+    const table={...Object.fromEntries(Object.entries(fresh).map(([k,v])=>[k,v*(1-blend.release)])),
+        payoff:blend.release*blend.payoff,linger:blend.release*(1-blend.payoff)};
+    if(heat>=1)table.major=0;
+    return table;
+}
+function sceDmRoll(s,key,position,recent=[]){
+    const level=sceDisruptionLevel(s);if(level==='off')return null;
+    const heat=sceDmHeat(key,position),table=sceDmTable(level,heat);
+    const kind=sceWeighted(Object.entries(table).map(([value,weight])=>({value,weight})));
+    const pool=SCE_DM_EVENTS[kind],instruction=s.antiRepeat?pickFresh(pool,recent):pick(pool);
+    const label=kind==='payoff'?'Payoff':kind==='linger'?'Linger':'Event ('+(kind==='major'?'major':kind==='minor'?'minor':'notable')+')';
+    return {tier:'dm',kind,label,instruction,heat};
+}
+function sceDmCommit(key,position,event){
+    const kept=(SCE_DM_HISTORY.get(key)||[]).filter(x=>x.pos<position);
+    SCE_DM_HISTORY.set(key,(event?[...kept,{pos:position,delta:SCE_DM_HEAT[event.kind]??0,kind:event.kind}]:kept).slice(-20));
+}
 const SCE_DISRUPTION_CHANCE = {off:0,low:.3,medium:.55,high:.8,max:1};
 const SCE_DISRUPTION_STEP = {off:0,low:.25,medium:.5,high:.75,max:1};
 const SCE_DISRUPTION_HARD_SHARE = 45;
@@ -1217,7 +1313,7 @@ function sceStructuralRoll(context=sceContext(),preview=false,type='normal'){
     const s=sceStructureSettings(context);if(!sceEffective(s,'structureEnabled'))return null;
     const key=getChatKey(context),history=SCE_STRUCTURE_HISTORY.get(key)||[],signals=sceStructureSignals(context);
     const target=sceStructureTargetCount(s.beatDensity),influence=s.structureInfluence/100;
-    const palette=scePalette(s),level=sceDisruptionLevel(s),breaks=sceDisruptionFamily(level);
+    const palette=scePalette(s),dm=sceDmMode(s),level=dm?'off':sceDisruptionLevel(s),breaks=dm?{reversal:0}:sceDisruptionFamily(level);
     const familyTone=Object.fromEntries(Object.keys(SCE_STRUCTURE_FAMILIES).map(id=>[id,(SCE_PALETTE_FAMILY[palette]?.[id]??1)*(breaks[id]??1)]));
     const pool=Object.entries(SCE_STRUCTURE_FAMILIES).filter(([id])=>s.structureWeights[id]*familyTone[id]>0).map(([id,f])=>{
         const compatible=Object.entries(f.affinity).reduce((a,[signal,w])=>a+(signals[signal]||0)*w,0);
@@ -1393,7 +1489,7 @@ function sceFormatCombined(roll,structure,watch=null,marker='',shape=null,autono
     const anchors=[...new Set([roll?.anchor,...(structure?.anchors||[])].filter(Boolean))].slice(0,1);
     const lines=['<scene_direction'+(marker?' id="'+marker+'"':'')+'>'];
     if(watch)lines.push(sceFormatEndingWatch(watch));
-    if(roll?.disruption)lines.push('Break: '+roll.disruption.instruction);
+    if(roll?.disruption)lines.push((roll.disruption.label||'Break')+': '+roll.disruption.instruction);
     if(shape)lines.push('Change: '+shape.text);
     if(structure)lines.push(sceFormatStructure(structure));
     const creative=sceFormatPrompt(roll);if(creative)lines.push(creative);
@@ -1419,9 +1515,11 @@ function sceCadenceCommit(key,position,fired){
     SCE_CADENCE_HISTORY.set(key,(fired?[...kept,position]:kept).slice(-10));
 }
 // One directive per firing turn: a Break, a Form (with its own phases and close), a single Lens, or a correction.
+// The DM's own event is the most common directive; forms, lenses and corrections share the rest.
 function sceSingleDirective(creative,structure,warning,shape){
-    const options=[creative.disruption&&'break',structure&&'form',creative.layers.length&&'lens',(warning||shape)&&'fix'].filter(Boolean);
-    const choice=pick(options);
+    const options=[creative.disruption&&{value:'break',weight:3},structure&&{value:'form',weight:1.5},
+        creative.layers.length&&{value:'lens',weight:1.5},(warning||shape)&&{value:'fix',weight:1}].filter(Boolean);
+    const choice=options.length?sceWeighted(options):null;
     creative.word_sparks=[];creative.anchor=null;
     if(choice!=='break')creative.disruption=null;
     creative.layers=choice==='lens'?creative.layers.slice(0,1):[];
@@ -1445,6 +1543,9 @@ function sceBuildPacket(context=sceContext(),preview=false,type='normal',marker=
     const fires=(preview&&!live)||sceCadenceFires(key,s,position);
     let kept={structure,warning,shape},directive=null;
     if(cadenced){
+        // The DM replaces the escalating Break pool; heat is read at this reply's position, so swipes re-read it.
+        const recentEvents=(sceRecentCueHistory.get(key)||[]).filter(x=>x.startsWith('disruption:')).map(x=>x.slice(11));
+        creative.disruption=fires?sceDmRoll(s,key,position,recentEvents):null;
         if(fires){kept=sceSingleDirective(creative,structure,warning,shape);directive=kept.choice;}
         else{creative.disruption=null;creative.layers=[];creative.word_sparks=[];creative.anchor=null;kept={structure:null,warning:null,shape:null};}
     }
@@ -1452,7 +1553,7 @@ function sceBuildPacket(context=sceContext(),preview=false,type='normal',marker=
     while(prompt.split(/\s+/u).length>allowance&&creative.layers.length>1){creative.layers.pop();prompt=sceFormatCombined(creative,kept.structure,kept.warning,marker,kept.shape,autonomy);}
     const packet={prompt,creative,structure:kept.structure,warning:kept.warning,shape:kept.shape,autonomy,settings:s,snapshot,
         quiet:cadenced&&!fires,directive,words:prompt?prompt.trim().split(/\s+/u).length:0};
-    if(cadenced&&(live||!preview))sceCadenceCommit(key,position,fires&&!!directive);
+    if(cadenced&&(live||!preview)){sceCadenceCommit(key,position,fires&&!!directive);sceDmCommit(key,position,directive==='break'?creative.disruption:null);}
     if(!preview)sceCommitPacketHistory(context,packet);
     return packet;
 }

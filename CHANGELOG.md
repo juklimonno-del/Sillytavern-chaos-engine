@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.6 — November 16, 2026
+
+Invisible DM: events with scale, and tension that releases.
+
+- Under cadence (the default), events come from a scaled table instead of the Break pool, every line of which escalated. Results: **minor** texture that needs no response, **notable** complications or opportunities (even split; some opportunities carry a catch), and rare **major** shifts. The disruption level sets the shares: Low never rolls a major; Max raises both notable and major.
+- A **heat** track per chat: notable results add 1, majors 2, payoffs remove 2, lingers 1, and heat fades by 0.05 per reply. Warm (1+) turns about 40% of the table to release and blocks new majors; hot (1.75+) turns 80% to release. Release is **Payoff** (resolve an open thread, for better or worse) or **Linger** (stay in the moment; nothing new).
+- The packet labels these `Event (minor|notable|major):`, `Payoff:` and `Linger:`; the label index defines them.
+- Heat is recorded per chat position, so swipes, regenerations and deletions re-read it.
+- Under cadence, structure no longer favors Rupture and Tempo shift over Sustained and Zoom, never picks Reversal, and closes from the balanced ending list.
+- The DM event is the most likely directive on a firing turn (weights: event 3, form 1.5, lens 1.5, correction 1).
+- *Every reply (stacked)* keeps the classic Break pool and escalation bias unchanged.
+- Add `tests/dm196.test.cjs`.
+
 ## 1.9.5 — November 16, 2026
 
 Cadence: the engine stops directing every reply.
