@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.3 — November 16, 2026
+
+Packet clarity update. No change to receipts, learning, placement or saved chat data.
+
+- Add a fixed label index (`story_chaos_engine_index`, in-prompt position, system role). It defines each packet label once (`Break`, `Form`, `Phases`, `Attention`, `Transition`, `Lens`, `State`, `Ledger` and the rest) and nothing else, so a system prompt no longer needs its own explanation of the packet. It is identical every turn so it stays cacheable, sorts ahead of the ledger format, and is cleared whenever no packet is sent.
+- Rewrite the phase lines of eighteen structure families so each names an act or event on the page. Remove qualifiers that capped scale ("small", "brief", "subtle", "if natural", "without a grand reveal") and craft vocabulary. Handoff now names its limit directly: the step goes to a character the user does not play. Rupture, Reversal and Tempo shift are unchanged.
+- Rewrite the transitions of the eight 1.8.0 families to describe movement between phases; their constraints were already in the phase lines. Tighten the original ten families' transitions.
+- Attention labels use "weight" instead of "linger", matching the index definition.
+- Deliberate anti-climax and Elastic time keep their deflating purpose; they remain Everyday-only.
+- Add `tests/index193.test.cjs`, including a check that every label a packet can emit is defined in the index.
+
 ## 1.9.2 — November 15, 2026
 
 Placement update. No change to receipts, learning or saved chat data.

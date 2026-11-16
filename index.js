@@ -1,11 +1,33 @@
 // Story Chaos Engine v1.8.4. Browser-only; no extra model calls or telemetry.
 // Pure selection/analysis helpers are kept separate from the host lifecycle below.
 'use strict';
-const SCE_VERSION = '1.9.2';
+const SCE_VERSION = '1.9.3';
 const SCE_SETTINGS_KEY = 'storyChaosEngine';
 const SCE_PROMPT_ID = 'story_chaos_engine_auto';
 // Static ledger format, placed with the system prompt so it is read once and cached; only per-turn lines ride in the packet.
 const SCE_LEDGER_PROMPT_ID = 'story_chaos_engine_ledger';
+const SCE_INDEX_PROMPT_ID = 'story_chaos_engine_index';
+// Fixed label reference for the packet. Identical every turn so it stays cacheable; definitions only.
+// Every label sceFormatCombined, sceFormatEndingWatch, sceAutonomyRoll and sceContinuePacket can emit must be listed.
+const SCE_PACKET_INDEX = ['<scene_direction_index>',
+    '<scene_direction> is a per-reply instruction packet. It applies to the next reply only. Its contents are never narrated, quoted, or referenced. Only labels present in the current packet apply.',
+    'Break: an event or change to introduce in this reply.',
+    'Change: a shape adjustment for this reply’s prose.',
+    'Form: the arrangement of this reply.',
+    'Route: the variant of that arrangement.',
+    'Phases: the beats of this reply, in order, separated by →.',
+    'Attention: relative weight across the phases. Not a paragraph count.',
+    'Transition: how the reply moves between phases.',
+    'Lens (name): a creative angle to apply.',
+    'Words in play: words to work into the prose.',
+    'Context word: an existing element of the scene to bring forward.',
+    'Close: the final beat of the reply.',
+    'Repeated closing wording / Recurring close: a pattern in recent replies to avoid this time.',
+    'State (name): that character’s current tracked condition.',
+    'Want / Stance / Desire / Stall (name): a correction to that character’s tracked state.',
+    'Drive (name): a self-motivated push for that character this reply.',
+    'Ledger: the tracker block to append, per the ledger format.',
+    '</scene_direction_index>'].join('\n');
 const SCE_PLACEMENTS = ['auto','last','before_user'];
 const SCE_FEATURES = ['structureEnabled', 'feedbackObserverEnabled', 'feedbackBalancerEnabled', 'endingWatchEnabled'];
 const SCE_PRESETS = Object.freeze({
@@ -123,159 +145,179 @@ const SCE_CATEGORIES = {
 };
 const SCE_STRUCTURE_FAMILIES = {
     sustained:{title:'Sustained moment',weight:3,min:1,max:2,affinity:{dialogue:1,action:1,observation:1},
-        phases:[['Sustain one ongoing interaction','Explore a practical task in detail','Stay with one character initiative'],
-            ['Let a minor consequence register','Allow a small aside without changing the primary focus']],
-        transitions:['Unbroken continuity','Brief natural aside','Subtle shift of attention']},
+        phases:[
+            ['Play out the current exchange beat by beat','Follow one task from start to finish in physical steps','Follow one character’s move all the way through'],
+            ['Let the last action leave a visible mark','Fit in one side action without leaving the main focus']
+        ],
+        transitions:['No cuts','One side beat, then straight back','Move focus without breaking the scene']},
     domino:{title:'Domino chain',weight:2,min:2,max:5,affinity:{action:2,consequence:2},
-        phases:[['Begin with an action already possible','Let a small decision create the first change'],
-            ['Follow a direct consequence','Follow a character response','Let a practical aftereffect develop'],
-            ['Carry the latest consequence forward','Leave circumstances visibly changed']],
-        transitions:['Direct cause and effect','Physical follow-through','Action-to-reaction handoff']},
+        phases:[
+            ['Open with an action a character can take right now','Open on a decision and the act that carries it out'],
+            ['Show what that action directly causes','Show how another character reacts to it','Show what the action breaks, moves, or uses up'],
+            ['Push the newest consequence one step further','Leave the situation changed from where the reply began']
+        ],
+        transitions:['Direct cause and effect','Physical follow-through','Each action triggers a reaction']},
     parallel:{title:'Parallel threads',weight:2,min:2,max:5,affinity:{dialogue:1,action:1,social:2},
-        phases:[['Follow an existing activity','Return to the first activity with a changed detail'],
-            ['Attend to a second independent activity','Let someone pursue a separate priority'],
-            ['Let two activities brush against one another, if natural','Keep activities separate without forcing convergence']],
-        transitions:['Alternating perspectives without omniscient leakage','Intercut ongoing activities','Shift between independent concerns']},
+        phases:[
+            ['Follow one character’s activity','Return to the first activity and show what changed in it'],
+            ['Cut to a second character doing something separate','Show another character pursuing their own aim'],
+            ['Let the two activities collide','Keep the two activities running separately']
+        ],
+        transitions:['Cut between threads; no one knows what they cannot see','Intercut the activities','Switch between separate concerns']},
     echo:{title:'Delayed echo',weight:2,min:3,max:5,affinity:{consequence:2,observation:2},
-        phases:[['Notice a small established detail','Let an ordinary choice create an unnoticed implication'],
-            ['Pursue an immediate interaction instead','Allow attention to drift elsewhere'],
-            ['Return to an earlier detail in a changed context','Let an earlier action matter without a grand reveal']],
-        transitions:['Temporary digression and later return','Loose association and callback','Delayed consequence']},
+        phases:[
+            ['Plant a concrete detail: an object, a remark, or an action','Have a character make a choice whose effect is not shown yet'],
+            ['Move to the immediate exchange','Shift focus to another part of the scene'],
+            ['Bring the planted detail back where it now matters','Show the effect of the earlier choice landing']
+        ],
+        transitions:['Leave the detail, then come back to it','Link back through association','The effect arrives late']},
     dialogue:{title:'Conversational drift',weight:2,min:2,max:5,affinity:{dialogue:3,social:1},
-        phases:[['Begin with a character-specific conversational impulse','Stay with the present exchange'],
-            ['Let a detail suggest a tangential topic','Follow an unexpected association','Make room for an awkward conversational turn'],
-            ['Leave the topic in motion','Return to the original concern only if someone wants to']],
-        transitions:['Topic association','Speaker-led redirection','Natural conversational interruption']},
+        phases:[
+            ['Open with a line only this character would say','Stay in the current exchange'],
+            ['Let one word or detail pull the talk onto a new topic','Have a speaker jump to an unexpected association','Have someone say something that lands badly'],
+            ['Stop with the new topic still in play','Return to the first topic only if a character pushes for it']
+        ],
+        transitions:['Move by topic association','A speaker steers the topic','Someone cuts in']},
     pivot:{title:'Directional pivot',weight:2,min:2,max:5,affinity:{action:2,observation:1},
-        phases:[['Establish one active priority','Develop the ongoing activity'],
-            ['A believable new priority redirects attention','A character chooses a different immediate objective'],
-            ['Follow through on the new activity','Explore consequences of the changed priority']],
-        transitions:['Abrupt but motivated switch','A practical redirection','A character-led change of focus']},
+        phases:[
+            ['Set up what a character is focused on','Carry the current activity forward'],
+            ['A new priority pulls the character away','A character drops the current aim for a different one'],
+            ['Follow the new activity through','Show what the switch costs or opens up']
+        ],
+        transitions:['Sudden switch with a clear reason','A practical redirect','A character changes direction by acting']},
     anticlimax:{title:'Deliberate anti-climax',weight:2,min:2,max:4,affinity:{dialogue:1,social:1,observation:1},
-        phases:[['Allow an expectation to form naturally','Notice an apparent opportunity for drama'],
-            ['Let the obvious reaction fail to happen','Someone chooses a mundane concern instead'],
-            ['Continue with ordinary life','Give a trivial detail disproportionate attention']],
+        phases:[
+            ['Build toward an expected reaction','Set up an obvious opening for drama'],
+            ['Have the expected reaction not come','Have someone turn to an ordinary concern instead'],
+            ['Carry on with the ordinary business of the scene','Give a trivial detail more attention than the setup got']
+        ],
         transitions:['Expectation quietly deflated','A casual refusal to escalate','Ordinary action takes over']},
     mosaic:{title:'Mosaic of moments',weight:1,min:2,max:5,affinity:{observation:2,social:1},
-        phases:[['Notice a distinctive small behavior','Focus on a mundane physical detail'],
-            ['Follow a nearby independent activity','A minor social interaction occupies the foreground'],
-            ['Let a separate observation develop','Return to an earlier detail, optionally']],
-        transitions:['Loose associative cuts','A collection of adjacent moments','Brief focus changes']},
+        phases:[
+            ['Show one character’s habit or tic','Focus on a physical object in the scene'],
+            ['Cut to a nearby character doing their own thing','Show a side exchange between other characters'],
+            ['Cut to another separate observation','Return to an earlier detail']
+        ],
+        transitions:['Hard cuts between moments','Jump between adjacent moments','Short focus changes']},
     reverse:{title:'Consequence first',weight:1,min:2,max:4,affinity:{consequence:2,observation:1},
-        phases:[['Begin with the immediate result of an established or plausible action','Start from a present consequence'],
-            ['Briefly reveal the cause through concrete context','Let preceding actions become clear without a long flashback'],
-            ['Continue from the consequence','Show what the new circumstance makes possible']],
-        transitions:['Short backward glance','A reveal through physical evidence','Present consequence followed by its origin']},
+        phases:[
+            ['Open on the result of an action not yet shown','Open in the aftermath, before the cause is clear'],
+            ['Reveal the cause through what is on hand: objects, marks, dialogue','Fill in what led here in a few lines, not a flashback'],
+            ['Pick up from the aftermath','Show what the new situation lets someone do']
+        ],
+        transitions:['One look backward','Reveal through physical evidence','Result first, then cause']},
     time:{title:'Elastic time',weight:1,min:2,max:4,affinity:{action:1,observation:2},
-        phases:[['Begin in one ongoing activity','Stay close to a small present moment'],
-            ['Skip an uneventful stretch of time','Compress repeated ordinary actions'],
-            ['Reveal change through a fresh detail','Return attention to what has shifted']],
+        phases:[
+            ['Open inside an ongoing activity','Hold close on the present moment'],
+            ['Skip ahead past stretches where nothing changes','Compress repeated actions into a line'],
+            ['Show what changed through one new detail','Return focus to what has shifted']
+        ],
         transitions:['Unannounced short time skip','Compressed routine then close detail','Brief ellipsis']},
     resume:{title:'Interrupted task',weight:1,min:3,max:5,affinity:{action:2,consequence:1},
         phases:[
-            ['Continue an existing task','Advance the activity already underway'],
-            ['Attend briefly to a nearby established concern','Turn briefly to another concern already present'],
-            ['Handle that concern with one small action','Give the intervening concern a practical response'],
-            ['Resume the same task with a concrete step','Return to the original activity and act'],
-            ['Move that task forward visibly','Show a concrete change in the ongoing task']
+            ['Continue the task already underway','Push the current activity ahead'],
+            ['Have something already in the scene demand attention','Pull a character onto another concern already present'],
+            ['Deal with that interruption in one action','Answer the interruption with a concrete act'],
+            ['Go back to the original task with a specific step','Return to the first activity and act on it'],
+            ['Show the task visibly further along','Show the task changed by what happened']
         ],
-        transitions:['Keep the original task active','Carry relevant changes into the return'],
+        transitions:['Cut away mid-task and cut back','Let the interruption break into the task'],
         routes:[
             {id:'early',label:'Diversion then return',orders:{3:[1,3,4],4:[0,1,3,4],5:[0,1,2,3,4]}},
             {id:'late',label:'Progress before diversion',orders:{3:[4,1,3],4:[0,4,1,3],5:[0,4,1,2,3]}}
         ]},
     revision:{title:'Attempt and adjustment',weight:1,min:3,max:5,affinity:{action:2,observation:2},
         phases:[
-            ['Try one available method','Put the current approach into practice'],
-            ['Observe what that attempt changes','Register the attempt’s actual result'],
-            ['Adjust the method using its observable result','Refine the approach in response to what happened'],
-            ['Apply the adjustment and show its immediate result','Try the revised method and show what changes'],
-            ['Continue from that result with a practical action','Carry the result into the next available step'],
-            ['Compare available methods against the current task','Briefly contrast two methods already available']
+            ['Try one method','Act on the current plan'],
+            ['Show what the attempt actually did','Show where it worked and where it failed'],
+            ['Change the method based on that result','Fix the approach where it fell short'],
+            ['Try again and show the new result','Apply the change and show what happens'],
+            ['Act on that result','Take the next step from where the result leaves things'],
+            ['Weigh two methods against the task','Have characters disagree over two approaches']
         ],
-        transitions:['Keep the same practical goal','Let actual results guide each adjustment'],
+        transitions:['Each result leads straight into the next attempt','Move from outcome to correction without a pause'],
         routes:[
             {id:'feedback',label:'Adjust from results',orders:{3:[0,2,3],4:[0,1,2,3],5:[0,1,2,3,4]}},
             {id:'compare',label:'Compare before trying',orders:{4:[5,0,2,3],5:[5,0,1,2,3]}}
         ]},
     funnel:{title:'Narrowing choices',weight:1,min:3,max:5,affinity:{observation:2,action:1,consequence:1},
         phases:[
-            ['Show the current practical choice','Establish a choice facing the acting character'],
-            ['Compare two already available ways forward','Contrast the practical options already present'],
-            ['Check an existing constraint in the scene','Test the options against a visible limitation'],
-            ['Narrow the options using the available evidence','Set aside an option for a concrete reason'],
-            ['Have the acting character take the selected step','Put the acting character’s chosen method into action'],
-            ['Try a small reversible step with one option','Probe one available approach through a limited action']
+            ['Put a decision in front of a character','Show the choice a character faces'],
+            ['Lay out two ways forward','Set the available options against each other'],
+            ['Test the options against a hard limit in the scene','Bring in a constraint: time, space, a person, or a rule'],
+            ['Cut an option for a specific reason','Rule something out based on what is known'],
+            ['Have the character act on the choice','Commit to the chosen option through action'],
+            ['Try one option partway first','Test one option with a limited action']
         ],
-        transitions:['Keep comparisons brief and practical','Let the acting character commit through action'],
+        transitions:['Each option drops away before the next is weighed','Move from weighing straight into action'],
         routes:[
             {id:'compare',label:'Compare then commit',orders:{3:[1,3,4],4:[0,1,3,4],5:[0,1,2,3,4]}},
             {id:'probe',label:'Try then choose',orders:{3:[5,3,4],4:[0,5,3,4],5:[0,5,2,3,4]}}
         ]},
     zoom:{title:'Shift of scale',weight:1,min:3,max:5,affinity:{observation:3,action:1},
         phases:[
-            ['Attend to a concrete detail already in view','Focus closely on a visible local detail'],
-            ['Show a connected activity within the scene','Follow an activity linking the nearby details'],
-            ['Widen attention to the reachable surroundings','Take in the immediate setting around the activity'],
-            ['Narrow attention to what the acting character can use','Select a relevant detail within the current activity'],
-            ['Let that focus lead into a concrete action','Act on something established within that view']
+            ['Focus on one detail in view: an object, a hand, a mark','Look closely at something specific within reach'],
+            ['Show the activity that connects that detail to the rest','Follow an action that links nearby details'],
+            ['Pull out to the surrounding space and who is in it','Show the wider room or area around the activity'],
+            ['Narrow back to the thing a character can use','Pick out the detail that matters to the current action'],
+            ['Have someone act on what is in focus','Turn that focus into an action']
         ],
-        transitions:['Keep time continuous as attention shifts','Stay within the character’s accessible surroundings'],
+        transitions:['Move focus in or out without a cut','Follow the eye from one scale to the next'],
         routes:[
             {id:'outward',label:'Detail to surroundings',orders:{3:[0,2,4],4:[0,1,2,4],5:[0,1,2,3,4]}},
             {id:'inward',label:'Surroundings to detail',orders:{3:[2,0,4],4:[2,1,0,4],5:[2,1,0,3,4]}}
         ]},
     counterpoint:{title:'Counterpoint',weight:1,min:3,max:5,affinity:{social:2,observation:2,dialogue:1},
         phases:[
-            ['Show one established response to the current situation','Follow one observable side of the present situation'],
-            ['Contrast two observable sides of the same situation','Set the available responses or details in contrast'],
-            ['Establish the shared practical context for a visible contrast','Show the practical concern linking two existing responses or details'],
-            ['Let the contrast affect the acting character’s next action','Have the acting character respond to that difference concretely'],
-            ['Follow the visible consequence of that action','Carry that action into an immediate practical result']
+            ['Show one character’s response to the situation','Follow one side of what is happening'],
+            ['Set two responses to the same situation side by side','Put two clashing details of the scene together'],
+            ['Establish what the two sides share','Show the concern both sides are responding to'],
+            ['Have a character act on the difference','Make the contrast change what someone does next'],
+            ['Show what that action causes','Follow the action to its immediate result']
         ],
-        transitions:['Compare material from the same situation','Keep contrasting behavior consistent with established characters'],
+        transitions:['Cut between the two sides','Set the two sides against each other in one beat'],
         routes:[
             {id:'reveal',label:'Contrast before shared context',orders:{3:[0,1,3],4:[0,1,2,3],5:[0,1,2,3,4]}},
             {id:'context',label:'Shared context before contrast',orders:{3:[2,1,3],4:[2,0,1,3],5:[2,0,1,3,4]}}
         ]},
     relay:{title:'Handoff',weight:1,min:3,max:5,affinity:{action:2,social:1,consequence:1},
         phases:[
-            ['Continue a task or handle an object already present','Advance work on something already in the scene'],
-            ['Pass a step to an established assistant-controlled participant or process','Transfer an available task between existing assistant-controlled participants or processes'],
-            ['Follow the visible work at the receiving stage','Show what the receiving participant or process actually does'],
-            ['Follow through on the handoff with a concrete action','Take the next available step after that transfer'],
-            ['Show the handoff’s immediate practical effect','Let the visible result of the transfer register'],
-            ['Receive the same task or object back in its current state','Bring that task or object back after the receiving stage']
+            ['Work on a task or object already in the scene','Push forward a job already underway'],
+            ['Pass a step to another character the user does not play','Hand the task or object to someone present who is not the user'],
+            ['Show what the receiver actually does with it','Follow the work in the receiver’s hands'],
+            ['Take the next step after the handoff','Follow the handoff with an action'],
+            ['Show what the handoff changed','Show the result of the transfer'],
+            ['Get the task or object back, changed','Have it return in its new state']
         ],
-        transitions:['Keep handoffs within established activity','Follow visible work without inventing another participant'],
+        transitions:['Follow the task as it changes hands','Cut to whoever holds the task now'],
         routes:[
             {id:'forward',label:'Transfer and follow through',orders:{3:[0,1,3],4:[0,1,2,3],5:[0,1,2,4,3]}},
             {id:'return',label:'Transfer and receive back',orders:{3:[1,5,3],4:[0,1,5,3],5:[0,1,2,5,3]}}
         ]},
     accumulate:{title:'Accumulation',weight:1,min:3,max:5,affinity:{consequence:2,action:1,observation:1},
         phases:[
-            ['Show two small contributions already possible in this situation','Bring together two available details or actions with a shared effect'],
-            ['Add another available contribution to the same situation','Let one further established detail or action contribute'],
-            ['Let an early combined effect become visible','Show how the contributions begin to add up'],
-            ['Show the contributions’ combined practical effect','Make the effect of those contributions concrete'],
-            ['Act on the combined effect visible now','Respond to that combined result with a concrete action'],
-            ['Carry one contribution further before combining the results','Follow one contributing action through before showing the whole effect']
+            ['Put two separate actions or details into play that point the same way','Show two contributions toward one effect'],
+            ['Add one more contribution','Have another action or detail join in'],
+            ['Show the first sign of them adding up','Show the early combined effect'],
+            ['Show the full combined effect','Make the total effect concrete'],
+            ['Have someone act on the result','Respond to the combined effect with an action'],
+            ['Follow one contribution further before the total lands','Track one piece through before showing the whole']
         ],
-        transitions:['Let separate contributions combine without forcing escalation','Keep the combined effect grounded in what actually occurred'],
+        transitions:['Each piece lands on top of the last','Stack the pieces, then show the total'],
         routes:[
             {id:'gather',label:'Gather before the combined effect',orders:{3:[0,3,4],4:[0,1,3,4],5:[0,1,5,3,4]}},
             {id:'build',label:'Build on an early effect',orders:{4:[0,2,1,4],5:[0,2,1,3,4]}}
         ]},
     discovery:{title:'Evidence and response',weight:1,min:3,max:5,affinity:{observation:3,action:1},
         phases:[
-            ['Notice an observable detail in the current scene','Attend to evidence already available to the character'],
-            ['Give one brief, provisional reading of that detail','Form a limited interpretation from what is visible'],
-            ['Check another detail the character can actually observe','Compare the interpretation with another accessible piece of evidence'],
-            ['Clarify or qualify what the visible evidence supports','Update the working interpretation without claiming unseen facts'],
-            ['Take one practical action supported by what is known','Act concretely on the evidence available now'],
-            ['Start from an interpretation the character has already expressed','Take up an assumption already established for the character']
+            ['Have a character notice something specific','Point a character at evidence already present'],
+            ['Have them read it one way','Give a quick first interpretation'],
+            ['Check a second detail','Test the reading against something else they can see or hear'],
+            ['Revise or confirm the reading from what is in front of them','Update the reading without adding facts they cannot know'],
+            ['Act on what is actually known','Take an action the evidence supports'],
+            ['Start from a belief the character already holds','Pick up an assumption already in play']
         ],
-        transitions:['Keep knowledge limited to accessible evidence','Retain uncertainty where the evidence remains incomplete'],
+        transitions:['Move from what is seen to what is made of it','Each detail prompts the next check'],
         routes:[
             {id:'examine',label:'Evidence before interpretation',orders:{3:[0,3,4],4:[0,2,3,4],5:[0,1,2,3,4]}},
             {id:'check',label:'Test an established interpretation',orders:{4:[5,2,3,4],5:[5,0,2,3,4]}}
@@ -324,11 +366,11 @@ const SCE_STRUCTURE_ENDINGS = ['Finish on a completed small action, not a hook.'
     'Allow a new ordinary priority to be underway.','Stop after a meaningful change; no forced cliffhanger.'];
 const SCE_LEGACY_STRUCTURE_IDS = ['sustained','domino','parallel','echo','dialogue','pivot','anticlimax','mosaic','reverse','time'];
 const SCE_ATTENTION_PROFILES = {
-    steady:'Spread attention evenly across the phases.',front:'Linger on the opening phase.',
-    back:'Linger on the closing phase.',middle:'Linger on the middle phase.',
-    rising:'Build detail steadily toward the final phase.',falling:'Give the opening the most detail and thin out toward the close.',
-    alternating:'Alternate longer and shorter moments across the phases.',bookends:'Linger on the first and last phases.',
-    uneven:'Vary attention irregularly across the phases.'
+    steady:'Give each phase about equal weight.',front:'Give the opening phase the most weight.',
+    back:'Give the closing phase the most weight.',middle:'Give the middle phase the most weight.',
+    rising:'Give each phase more weight than the one before.',falling:'Give the opening the most weight and less to each phase after.',
+    alternating:'Alternate heavier and lighter phases.',bookends:'Give the first and last phases the most weight.',
+    uneven:'Vary the weight across the phases irregularly.'
 };
 // Cue palette. "neutral" (the default) drops cues written to deflate tension and keeps the scene's own register.
 // "intense" also adds cues that carry stakes and consequence forward. "everyday" is the unchanged 1.8.0 library.
@@ -1381,11 +1423,13 @@ const SCE_RUN_RECEIPTS=new SceBoundedMap();
 let sceLifecycleStart=null,sceActiveRun=null,sceRunCounter=0,sceRuntimeEnabled=true;
 let sceListeningSource=null,sceListeners=[],sceUiInitObserver=null,sceBootstrapTimer=null;
 let sceToolRegistered=false,sceFinishTimer=null;
-function sceClearPrompt(context=sceContext()) {context?.setExtensionPrompt?.(SCE_LEDGER_PROMPT_ID,'',0,0,false,0);context?.setExtensionPrompt?.(SCE_PROMPT_ID,'',1,0,false,1);}
+function sceClearPrompt(context=sceContext()) {context?.setExtensionPrompt?.(SCE_INDEX_PROMPT_ID,'',0,0,false,0);context?.setExtensionPrompt?.(SCE_LEDGER_PROMPT_ID,'',0,0,false,0);context?.setExtensionPrompt?.(SCE_PROMPT_ID,'',1,0,false,1);}
 // Gemini receives mid-chat system turns as user text, so by default the packet sits just before the user's message
 // and the user's own action is the last thing the model reads. Other sources keep the packet last.
 function sceGoogleSource(context){return context?.mainApi==='openai'&&['makersuite','vertexai'].includes(context?.chatCompletionSettings?.chat_completion_source);}
 function scePacketDepth(context,s){const p=s?.packetPlacement;return p==='before_user'?1:p==='last'?0:sceGoogleSource(context)?1:0;}
+// The index precedes the ledger format: SillyTavern joins in-prompt extension prompts in sorted key order.
+function sceSetIndex(context,prompt){context.setExtensionPrompt(SCE_INDEX_PROMPT_ID,prompt?SCE_PACKET_INDEX:'',0,0,false,0);}
 function sceSetLedgerSpec(context,s){context.setExtensionPrompt(SCE_LEDGER_PROMPT_ID,sceAutonomyOn(s)?sceLedgerSpec(sceUserName(context)):'',0,0,false,0);}
 function sceSafeClear(context=sceContext()){try{sceClearPrompt(context);}catch(error){console.warn('[Story Chaos Engine] Unable to clear the host prompt.',error);}}
 function sceRunReceipt(context=sceContext()){return SCE_RUN_RECEIPTS.get(getChatKey(context))||null;}
@@ -1604,7 +1648,7 @@ globalThis.storyChaosEngineInterceptor=async function(chat,_contextSize,_abort,t
         if(kind==='continue'&&sceRuntimeEnabled&&settings.enabled&&settings.mode==='automatic'&&sceAutonomyOn(settings)){
             const prompt=sceContinuePacket(context,'SCE-'+(++sceRunCounter)+'-'+randomInt(1000000));
             sceAutonomyStripChat(chat,settings);
-            sceSetLedgerSpec(context,settings);
+            sceSetIndex(context,prompt);sceSetLedgerSpec(context,settings);
             // Continue stays last: the reply being continued must remain the final turn.
             context.setExtensionPrompt(SCE_PROMPT_ID,prompt,1,0,false,settings.role==='system'?0:1);
             return;
@@ -1623,7 +1667,7 @@ globalThis.storyChaosEngineInterceptor=async function(chat,_contextSize,_abort,t
         // Old ledgers leave the outgoing history; the newest state rides in the packet instead.
         sceAutonomyStripChat(chat,packet.settings);
         // Preparation is synchronous. One atomic replacement, or a clear in the failure handler.
-        sceSetLedgerSpec(context,packet.settings);
+        sceSetIndex(context,packet.prompt);sceSetLedgerSpec(context,packet.settings);
         context.setExtensionPrompt(SCE_PROMPT_ID,packet.prompt,1,scePacketDepth(context,packet.settings),false,settings.role==='system'?0:1);
         const run={id,key:getChatKey(context),type:kind,started,targetIndex,state:'prepared',prompt:packet.prompt,packet:{creative:packet.creative,structure:packet.structure,autonomy:packet.autonomy},
             settings:packet.settings,layers:packet.creative.layers.length,family:packet.structure?.family||null,
